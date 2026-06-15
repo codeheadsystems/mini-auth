@@ -1,0 +1,564 @@
+openapi: 3.1.0
+info:
+  title: mini-idp
+  version: "1.0.0"
+  description: |
+    **mini-idp** is a small standalone identity provider. It registers clients, issues short-lived
+    Ed25519-signed JWT access tokens via the OAuth 2.0 client-credentials grant, and publishes its
+    public signing keys (JWKS) so a verifier (the companion **mini-kms** service) can validate
+    tokens **offline**.
+
+    This document is the authoritative contract: a verifier can integrate against it without
+    reading mini-idp source. It fully describes the token endpoint, the JWKS shape, the discovery
+    document, the admin API, and — most importantly for integrators — the **JWT claim schema**
+    (see the `JwtClaims` schema), whose `grants` claim maps cleanly onto mini-kms's
+    `Principal` / `KeyOperation` model.
+
+    ## Token verification (what a verifier does)
+    1. Fetch `GET /.well-known/jwks.json` and cache it.
+    2. For a presented token, read the JWS header `kid`, select the matching JWK, and verify the
+       `EdDSA` (Ed25519) signature over `base64url(header) "." base64url(payload)`.
+    3. Validate `iss`, `aud`, and the `nbf`/`exp` time window.
+    4. Optionally poll `GET /admin/revocations` and reject any token whose `jti` is listed.
+    5. Map `sub` → `Principal.id`, `grants.control` → `Principal.admin`, and each
+       `grants.groups[]` entry → a per-key-group authorization decision.
+servers:
+  - url: http://127.0.0.1:8455
+    description: Default loopback bind address.
+
+tags:
+  - name: oauth
+    description: Token issuance and OAuth/OIDC-style discovery.
+  - name: jwks
+    description: Public signing keys for offline verification.
+  - name: admin
+    description: Operator API, guarded by the bootstrap admin bearer token.
+  - name: meta
+    description: Health and the served specification.
+
+paths:
+  /oauth/token:
+    post:
+      tags: [oauth]
+      summary: Issue an access token (client-credentials grant)
+      description: |
+        Authenticates a client by `client_id` + `client_secret` (sent either as form fields —
+        `client_secret_post` — or via HTTP Basic — `client_secret_basic`) and returns a signed JWT.
+        On any authentication failure a single generic `invalid_client` error is returned with no
+        detail distinguishing an unknown client from a wrong secret (no credential oracle).
+      security:
+        - clientSecretBasic: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type]
+              properties:
+                grant_type:
+                  type: string
+                  enum: [client_credentials]
+                client_id:
+                  type: string
+                  description: Required unless supplied via HTTP Basic.
+                client_secret:
+                  type: string
+                  description: Required unless supplied via HTTP Basic.
+                scope:
+                  type: string
+                  description: Optional and currently advisory; granted scope is determined by the client's stored grants.
+      responses:
+        "200":
+          description: A signed access token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          description: Missing or unsupported grant.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Client authentication failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /.well-known/jwks.json:
+    get:
+      tags: [jwks]
+      summary: Public signing keys (JWK Set)
+      description: |
+        The current public signing keys. During key rotation this set contains the freshly
+        activated key plus recently retired keys (overlapping `kid`s), so tokens signed just before
+        a rotation still verify until they expire.
+      responses:
+        "200":
+          description: The JWK Set.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JwkSet" }
+
+  /.well-known/idp-configuration:
+    get:
+      tags: [oauth]
+      summary: Discovery document
+      description: Issuer, token endpoint, and JWKS URI, plus supported grant/auth/alg values.
+      responses:
+        "200":
+          description: The discovery document.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DiscoveryDocument" }
+
+  /health:
+    get:
+      tags: [meta]
+      summary: Liveness check
+      responses:
+        "200":
+          description: The service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+
+  /openapi.yaml:
+    get:
+      tags: [meta]
+      summary: This specification, as YAML
+      responses:
+        "200":
+          description: The OpenAPI document (YAML).
+          content:
+            application/yaml:
+              schema: { type: string }
+
+  /openapi.json:
+    get:
+      tags: [meta]
+      summary: This specification, as JSON
+      responses:
+        "200":
+          description: The OpenAPI document (JSON).
+          content:
+            application/json:
+              schema: { type: object }
+
+  /docs:
+    get:
+      tags: [meta]
+      summary: Swagger UI
+      description: Human-facing Swagger UI rendering this specification (assets are vendored).
+      responses:
+        "200":
+          description: HTML page.
+          content:
+            text/html:
+              schema: { type: string }
+
+  /admin/clients:
+    post:
+      tags: [admin]
+      summary: Register a client
+      description: Creates a client and returns its one-time plaintext secret (shown only once).
+      security:
+        - adminBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterClientRequest" }
+      responses:
+        "201":
+          description: The created client and its one-time secret.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterClientResponse" }
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [admin]
+      summary: List clients
+      description: Lists all clients. Secret hashes are never returned.
+      security:
+        - adminBearer: []
+      responses:
+        "200":
+          description: The clients.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ClientView" }
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/clients/{id}:
+    delete:
+      tags: [admin]
+      summary: Remove a client
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Removed.
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such client.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/clients/{id}/grants:
+    put:
+      tags: [admin]
+      summary: Set a client's grants
+      description: Replaces the client's authorization (control-plane flag + per-key-group operations).
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GrantsClaim" }
+      responses:
+        "200":
+          description: The updated client.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClientView" }
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such client.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/keys/rotate:
+    post:
+      tags: [admin]
+      summary: Rotate the signing key
+      description: |
+        Activates a fresh Ed25519 signing key. The previous key is retired but stays published in
+        the JWKS until every token it could have signed has expired.
+      security:
+        - adminBearer: []
+      responses:
+        "200":
+          description: The new active key id.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  activeKid: { type: string }
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/revocations:
+    post:
+      tags: [admin]
+      summary: Revoke a token id (jti)
+      description: |
+        Adds a `jti` to the pollable denylist. Short TTLs are the primary control; this kills a
+        specific outstanding token before its `exp`.
+      security:
+        - adminBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RevocationRequest" }
+      responses:
+        "201":
+          description: The recorded revocation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Revocation" }
+        "400":
+          description: Missing jti.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [admin]
+      summary: The current revocation denylist
+      description: The active (un-expired) revocations, for a verifier to poll.
+      security:
+        - adminBearer: []
+      responses:
+        "200":
+          description: The denylist.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Revocation" }
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/audit:
+    get:
+      tags: [admin]
+      summary: Audit log
+      description: Issuance / grant / revocation / rotation / client lifecycle entries, oldest first.
+      security:
+        - adminBearer: []
+      responses:
+        "200":
+          description: The audit entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AuditEntry" }
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  securitySchemes:
+    adminBearer:
+      type: http
+      scheme: bearer
+      description: "The bootstrap admin token, presented as `Authorization: Bearer <token>`."
+    clientSecretBasic:
+      type: http
+      scheme: basic
+      description: "Client credentials as HTTP Basic (`client_id`:`client_secret`)."
+
+  schemas:
+    Error:
+      type: object
+      description: OAuth-style error body.
+      properties:
+        error: { type: string }
+        error_description: { type: string }
+      required: [error]
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: The compact JWS (see JwtClaims for the decoded payload).
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          description: Lifetime in seconds.
+        scope:
+          type: string
+          description: Space-delimited summary of granted access (`group:OPERATION` entries, plus `control`).
+      required: [access_token, token_type, expires_in]
+
+    JwtClaims:
+      type: object
+      description: |
+        The decoded payload of an issued access token (the published token claim schema). The token
+        itself is a compact Ed25519 JWS with header `{"alg":"EdDSA","typ":"JWT","kid":"<kid>"}`.
+      properties:
+        iss:
+          type: string
+          description: Issuer URL.
+        sub:
+          type: string
+          description: The clientId. Maps to mini-kms `Principal.id`.
+        aud:
+          type: string
+          description: The intended audience (the mini-kms service).
+        iat:
+          type: integer
+          description: Issued-at (epoch seconds).
+        nbf:
+          type: integer
+          description: Not-before (epoch seconds).
+        exp:
+          type: integer
+          description: Expiry (epoch seconds).
+        jti:
+          type: string
+          description: Unique token id (used for revocation).
+        grants:
+          $ref: "#/components/schemas/GrantsClaim"
+        cnf:
+          type: object
+          description: |
+            OPTIONAL confirmation claim (RFC 7800), reserved for future channel binding (e.g. an
+            mTLS thumbprint `x5t#S256` or a peer uid). Not populated or enforced yet.
+          additionalProperties: true
+      required: [iss, sub, aud, iat, nbf, exp, jti, grants]
+
+    GrantsClaim:
+      type: object
+      description: |
+        The authorization payload. `control` maps to mini-kms `Principal.admin`; each `groups[]`
+        entry maps to a `KeyAuthorizationPolicy` decision for that key group.
+      properties:
+        control:
+          type: boolean
+          description: Whether the client holds control-plane (admin) authority.
+        groups:
+          type: array
+          items: { $ref: "#/components/schemas/GroupGrant" }
+      required: [control, groups]
+
+    GroupGrant:
+      type: object
+      properties:
+        keyGroup:
+          type: string
+          description: The key-group identifier.
+        operations:
+          type: array
+          description: Granted operations; names match mini-kms `KeyOperation`.
+          items:
+            type: string
+            enum: [GENERATE_DATA_KEY, ENCRYPT, DECRYPT, RE_ENCRYPT]
+      required: [keyGroup, operations]
+
+    Jwk:
+      type: object
+      description: An Ed25519 public key in JWK form (RFC 8037).
+      properties:
+        kty: { type: string, enum: [OKP] }
+        crv: { type: string, enum: [Ed25519] }
+        x:
+          type: string
+          description: The raw 32-byte public key, base64url (unpadded).
+        use: { type: string, enum: [sig] }
+        alg: { type: string, enum: [EdDSA] }
+        kid: { type: string }
+      required: [kty, crv, x, kid]
+
+    JwkSet:
+      type: object
+      properties:
+        keys:
+          type: array
+          items: { $ref: "#/components/schemas/Jwk" }
+      required: [keys]
+
+    DiscoveryDocument:
+      type: object
+      properties:
+        issuer: { type: string }
+        token_endpoint: { type: string }
+        jwks_uri: { type: string }
+        grant_types_supported:
+          type: array
+          items: { type: string }
+        token_endpoint_auth_methods_supported:
+          type: array
+          items: { type: string }
+        token_endpoint_auth_signing_alg_values_supported:
+          type: array
+          items: { type: string }
+        id_token_signing_alg_values_supported:
+          type: array
+          items: { type: string }
+      required: [issuer, token_endpoint, jwks_uri]
+
+    RegisterClientRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+          description: Optional human label.
+        authorization:
+          $ref: "#/components/schemas/GrantsClaim"
+
+    RegisterClientResponse:
+      type: object
+      properties:
+        clientId: { type: string }
+        secret:
+          type: string
+          description: The one-time plaintext secret. Store it now; it is not recoverable later.
+        displayName: { type: string }
+        authorization: { $ref: "#/components/schemas/GrantsClaim" }
+        createdAt: { type: integer, description: Epoch seconds. }
+      required: [clientId, secret, createdAt]
+
+    ClientView:
+      type: object
+      description: A client as listed by the admin API. Never includes secret material.
+      properties:
+        clientId: { type: string }
+        displayName: { type: string }
+        enabled: { type: boolean }
+        createdAt: { type: integer, description: Epoch seconds. }
+        authorization: { $ref: "#/components/schemas/GrantsClaim" }
+      required: [clientId, enabled, createdAt]
+
+    RevocationRequest:
+      type: object
+      properties:
+        jti: { type: string }
+        expiresAt:
+          type: integer
+          description: The revoked token's exp (epoch seconds). Optional; defaults to now + token TTL.
+        reason: { type: string }
+      required: [jti]
+
+    Revocation:
+      type: object
+      properties:
+        jti: { type: string }
+        revokedAt: { type: integer, description: Epoch seconds. }
+        expiresAt: { type: integer, description: Epoch seconds; entry prunable after this. }
+        reason: { type: string }
+      required: [jti, revokedAt, expiresAt]
+
+    AuditEntry:
+      type: object
+      properties:
+        at: { type: integer, description: Epoch seconds. }
+        event: { type: string, description: "e.g. token.issued, client.registered, key.rotated." }
+        clientId: { type: string }
+        detail: { type: string }
+      required: [at, event]

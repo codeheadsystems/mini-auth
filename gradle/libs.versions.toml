@@ -1,0 +1,29 @@
+# Dependency version catalog for the whole mini-auth monorepo (the vendored mini-kms / mini-idp
+# modules AND the new modules all resolve through this one catalog).
+#
+# Jackson is on the 3.x line (tools.jackson.*): the family standardized on Jackson 3 when the
+# minis were pulled in, matching pk-auth's transitive Jackson. NOTE the coordinate change from
+# 2.x — databind/dataformats moved to the `tools.jackson` group; only jackson-annotations stayed
+# on `com.fasterxml.jackson.core` (pulled in transitively by databind).
+
+[versions]
+jackson = "3.2.0"
+bouncycastle = "1.84"
+junit-jupiter = "6.1.0"
+# pk-auth: the passkeys-first auth library set, consumed from Maven Central (NOT vendored).
+# mini-oidc depends on pk-auth-core for the passkey credential layer.
+pk-auth = "2.0.0"
+
+[libraries]
+# JSON (Jackson 3.x). Used by mini-kms's protocol/keystore, mini-idp's claims/stores/DTOs,
+# and the new modules. `tools.jackson.core` is the Jackson-3 group id.
+jackson-databind = { module = "tools.jackson.core:jackson-databind", version.ref = "jackson" }
+# Jackson 3.x YAML dataformat: mini-idp parses the checked-in openapi.yaml and serves it as JSON.
+jackson-yaml = { module = "tools.jackson.dataformat:jackson-dataformat-yaml", version.ref = "jackson" }
+# Argon2id KDF + crypto provider, same coordinate the minis use.
+bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
+
+# --- pk-auth (external, Maven Central, com.codeheadsystems) -----------------------------
+# The passkey credential layer mini-oidc builds its login/registration ceremonies on.
+pk-auth-core = { module = "com.codeheadsystems:pk-auth-core", version.ref = "pk-auth" }
