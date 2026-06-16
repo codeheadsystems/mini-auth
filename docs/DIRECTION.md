@@ -14,6 +14,7 @@ understand the whole, read this one.
 - [System architecture](#system-architecture)
 - [Runtime relationships (what the names don't show)](#runtime-relationships)
 - [Open design decision: the client registry](#open-design-decision-the-client-registry)
+- [Toward a mini-common library](#toward-a-mini-common-library)
 - [Roadmap](#roadmap)
 - [Build aggregation](#build-aggregation)
 
@@ -193,16 +194,49 @@ in code.
 
 ---
 
+## Toward a `mini-common` library
+
+The two shipping services were written independently, so they each grew their own copy of the same
+small security primitives. Now that they are co-built, those copies are genuine duplication and a
+natural future **`libs/mini-common`** (an I/O-free foundation library both `core`s would depend on).
+This is a **catalogue, not a commitment** — the code is intentionally **left in place for now**.
+Extraction is its own behavior-preserving step (likely folded into Phase 1, alongside mini-token),
+done only with tests pinning the behavior first.
+
+The concrete candidates found across mini-kms and mini-idp:
+
+| Candidate | mini-kms | mini-idp | Notes / risk |
+| --- | --- | --- | --- |
+| **Argon2id KDF + params** | `master/Argon2KeyDeriver`, `master/Argon2Settings` | `secret/Argon2SecretHasher`, `secret/Argon2Settings` | Two near-identical `Argon2Settings`. **But** the use differs — mini-kms derives a *key* from a passphrase, mini-idp *hashes/verifies* a secret — so extract the settings + Bc wiring, keep the two call sites' intent. |
+| **Atomic `0600` JSON store** | `keyring/Keystore` | `store/JsonStore` | Same temp-file → `ATOMIC_MOVE` → `0600` (POSIX perms) write pattern. The cleanest, highest-value extraction; mini-kms layers an HMAC over metadata (`KeystoreIntegrity`) on top — keep that service-specific. |
+| **base64url codec** | inline in `protocol/*`, `keyring/*` | `token/Base64Url` (dedicated) | mini-idp already has the standalone util; mini-kms open-codes `Base64.getUrlEncoder().withoutPadding()` in several places. Promote mini-idp's `Base64Url`. |
+| **Constant-time compare** | `auth/ApiTokenAuthenticator`, `keyring/KeystoreIntegrity` | `server/AdminAuthenticator`, `secret/Argon2SecretHasher` | All wrap `MessageDigest.isEqual`. Trivial to share; low risk. |
+| **ServerConfig env/file secret resolution** | `server/ServerConfig` (`resolveToken`, `readPassphrase`) | `server/ServerConfig` (`resolveAdminToken`) | The "secret from env var or file, never argv; loopback bind by default; port parsing" pattern. Shape is shared; the exact var names are service-specific, so extract the *mechanism*, parameterized by var name. |
+| **Secure random identifiers** | nonce/id generation in `crypto/*` | `util/RandomIds` | Both lean on `SecureRandom` for ids/nonces; a tiny shared helper would remove a second copy. Lowest priority. |
+
+Why not extract now: mini-idp and mini-kms are both **shipping**, the duplication is small and
+stable, and a premature shared base risks coupling two working services to a still-moving API. The
+ethos ("small, single-responsibility, readable") is better served by extracting these *with* the
+mini-token work, when there is a clear second consumer and tests to lean on.
+
+---
+
 ## Roadmap
 
 Phased, each phase building on a green umbrella build. Earlier phases unblock later ones.
 
-**Phase 0 — Umbrella (done).** Composite aggregator builds mini-kms + mini-idp in place; every new
-service and library is scaffolded to compile + pass a trivial test; this direction doc exists.
+**Phase 0 — Umbrella (done).** A single unified monorepo build: mini-kms + mini-idp pulled in from
+their two formerly-independent builds and regrouped under `services/` and `libs/`, behind one
+wrapper, one version catalog, one set of `build-logic` convention plugins, and one CI workflow.
+Every new service and library is scaffolded to compile + pass a trivial test; this direction doc
+exists.
 
-**Phase 1 — Extract the token plane.** Lift mini-idp's JWS/JWKS/rotation/revocation/audit into
-**mini-token**; re-point mini-idp at it with no contract change. This is the lowest-risk extraction
-because mini-idp already has the reference implementation and tests.
+**Phase 1 — Extract the token plane (and the shared foundation).** Lift mini-idp's
+JWS/JWKS/rotation/revocation/audit into **mini-token**; re-point mini-idp at it with no contract
+change. This is the lowest-risk extraction because mini-idp already has the reference implementation
+and tests. The same step is the right moment to extract the
+[`mini-common` candidates](#toward-a-mini-common-library) (Argon2 settings, the atomic-`0600` JSON
+store, base64url, constant-time compare) once there is a clear second consumer to pin them against.
 
 **Phase 2 — Generalize authorization.** Flesh out **mini-policy** into a real engine and adopt it
 behind mini-kms's `KeyAuthorizationPolicy` seam first (it already has the right shape), then behind
@@ -233,20 +267,46 @@ private signing key sits in plaintext on disk anywhere in the family.
 
 ## Build aggregation
 
-mini-auth is a single **monorepo** Gradle build. mini-kms and mini-idp were pulled in as nested
-module groups, and `settings.gradle.kts` includes them by path:
+mini-auth is a single **monorepo** Gradle build. Modules are grouped by role — `services/` for the
+deployable front doors, `libs/` for the shared libraries — and the Gradle project path follows the
+directory, so `settings.gradle.kts` includes them as:
 
 ```kotlin
-include("mini-kms:core"); include("mini-kms:server"); include("mini-kms:client")
-include("mini-idp:core"); include("mini-idp:server")
+include("services:mini-kms:core"); include("services:mini-kms:server"); include("services:mini-kms:client")
+include("services:mini-idp:core"); include("services:mini-idp:server")
+include("services:mini-oidc"); include("services:mini-gateway"); include("services:mini-directory")
+include("services:mini-ca"); include("services:mini-console")      // roadmap placeholders
+include("libs:mini-token"); include("libs:mini-policy")
 ```
 
-`include("mini-kms:core")` maps to the directory `mini-kms/core` and auto-creates the (empty)
-parent project `:mini-kms`. Leaf names repeat across groups (`:mini-kms:core` and `:mini-idp:core`)
-— Gradle keys on the full path, so that is fine. One `./gradlew build` compiles and tests the whole
-family with no composite or submodule machinery; the root build's `subprojects {}` block applies
-the shared Java conventions (Maven Central, pinned JDK 21 toolchain, JUnit 5, the `-parameters`
-flag) to every module, vendored and new alike.
+`include("services:mini-kms:core")` maps to the directory `services/mini-kms/core` and auto-creates
+the (empty, inert) grouping projects `:services` and `:services:mini-kms`. Leaf names repeat across
+groups (`:services:mini-kms:core` and `:services:mini-idp:core`) — Gradle keys on the full path, so
+that is fine. One `./gradlew build` compiles and tests the whole family with no composite or
+submodule machinery.
+
+**One wrapper, one toolchain, convention plugins (not `subprojects {}`).** There is a single Gradle
+wrapper at the root (the per-module wrappers the two minis shipped as independent repos are gone),
+one `gradle/libs.versions.toml`, and the shared Java conventions live in a small **`build-logic`**
+included build — `pluginManagement { includeBuild("build-logic") }` in settings. It exposes three
+precompiled script plugins, applied per-module by id:
+
+- `miniauth.java-conventions` — Maven Central, the pinned JDK 21 toolchain, JUnit 5 + the common
+  test stack (jupiter + launcher), and the `-parameters` flag Jackson record binding relies on.
+- `miniauth.library-conventions` — the above + `java-library` (the I/O-free `core`s, mini-token,
+  mini-policy, the placeholders).
+- `miniauth.application-conventions` — the above + `application` (the runnable services).
+
+Applying the conventions per-module (instead of a root `subprojects {}` block) keeps the empty
+grouping projects inert and makes each module's library-vs-service contract explicit in its own
+build file. The base packages (`com.codeheadsystems.minikms` / `.miniidp` / …) were **not** changed
+by the regrouping. A single CI workflow (`.github/workflows/build.yml`) runs `./gradlew build` on
+every push and pull request — there is no separate lint step, because the family deliberately ships
+no extra linter/formatter; the build is the gate.
+
+> Build-script gotcha worth knowing: **never put backticks in a comment that precedes a `plugins {}`
+> block** in a `*.gradle.kts` file. Gradle's lightweight prescan of the plugins block can be
+> derailed by backtick-quoted text in that comment, and the plugin then silently fails to apply.
 
 **Why a monorepo (not the earlier composite).** An earlier iteration used a Gradle composite that
 `includeBuild`-referenced the sibling repos in place. Pulling the source in instead makes the

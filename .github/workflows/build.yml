@@ -1,0 +1,54 @@
+# Single CI workflow for the whole mini-auth monorepo.
+#
+# One job builds and tests the ENTIRE family on every push and pull request: `./gradlew build`
+# from the root compiles and runs the tests of every module (the vendored mini-kms / mini-idp
+# services and the new libs/services alike) plus the build-logic convention plugins. There is no
+# separate lint step — the family deliberately has no extra linter/formatter, so the build IS the
+# gate (see CLAUDE.md / docs/DIRECTION.md).
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel an in-flight run when a newer commit is pushed to the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      # Pin the toolchain to JDK 21 (matches the Gradle toolchain the convention plugins request,
+      # so no foojay auto-download is needed in CI).
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # Sets up the Gradle wrapper with build caching keyed on the wrapper + dependency state.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The full gate: compile + test every module in the monorepo.
+      - name: Build (compile + test the whole family)
+        run: ./gradlew build --stacktrace
+
+      # Surface JUnit reports as a build artifact when anything fails.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: "**/build/reports/tests/**"
+          retention-days: 7

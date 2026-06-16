@@ -1,0 +1,275 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this
+repository. It is the **single** guide for the whole `mini-` family: the umbrella conventions
+first, then a folded-in section per shipping service (mini-kms, mini-idp). There are no
+per-module `CLAUDE.md` files — this is it.
+
+> **Read first.** `docs/DIRECTION.md` is the canonical map of the family — the vision, the
+> component catalog, the architecture, the runtime relationships, the roadmap, and the
+> `mini-common` extraction candidates. Read it before touching code, then read the relevant
+> service section below and the module's own `README.md`.
+
+## What this is
+
+mini-auth is the **monorepo** for a family of small, single-responsibility auth/identity services
+and libraries, built in the spirit of **mini-kms** and **mini-idp**: **educational, but
+homelab-functional.** The code is meant to be *read* — heavily commented, JDK-first, real-but-
+un-audited crypto via vetted libraries. mini-auth itself is two things:
+
+1. **One aggregator build** — `./gradlew build` from the root compiles and tests the whole family
+   (vendored services included), under one wrapper, one version catalog, and one set of
+   convention plugins.
+2. **The shared direction doc** (`docs/DIRECTION.md`) — the map the individual modules can't carry.
+
+mini-kms and mini-idp were **two formerly-independent Gradle builds**, pulled in and unified here:
+one root wrapper, one `settings.gradle.kts`, one `gradle/libs.versions.toml`, one `build-logic`
+convention-plugin set, and one CI workflow. mini-auth does **not re-implement** what the shipping
+services already do — it composes them and adds the connective tissue (`mini-token`,
+`mini-policy`) and the new front doors (`mini-oidc`, `mini-gateway`, `mini-directory`).
+
+## The "mini-" ethos (non-negotiable)
+
+- **Small, single-responsibility, readable.** A "mini" is either a *library* (focused machinery)
+  or a *service* (a thin deployable front door that wires libraries together and adds a transport).
+  Clarity and correct security reasoning matter more than features; comments carry teaching weight.
+- **Real but un-audited crypto via vetted libraries.** Never hand-roll crypto you can get from
+  **pk-auth** or the existing **token plane** (mini-idp / the future mini-token). Where the family
+  *does* hand-roll a format (mini-idp's JWS, mini-kms's envelopes), it is deliberate, isolated, and
+  heavily commented — match that bar, don't add new hand-rolled crypto casually.
+- **`core` stays I/O-free.** Crypto and domain logic never import a transport (no sockets, HTTP,
+  or CLI parsing in `core`). The composition root lives in the `server`/`application` module.
+- **Scaffolds say so.** A "scaffolded" module compiles and passes a trivial test, with the real
+  protocol/crypto left as clearly-marked TODOs at the seams. Do **not** turn a scaffold into a
+  half-built service that *looks* finished — preserve the honest seams.
+
+## Security conventions (mirror these everywhere)
+
+- **No secrets in logs.** Tokens, passphrases, private keys, and request/response bodies are
+  never logged. Access logs record method/path/status only.
+- **No oracles.** Auth/crypto failures collapse to one generic error (mini-idp's single
+  `invalid_client`; mini-kms's single `DecryptionFailed`) — never distinguish unknown-principal
+  from wrong-secret, or leak *why* a decrypt failed.
+- **Constant-time secret comparison** (`MessageDigest.isEqual`); handle passphrases as `char[]`
+  and zero them.
+- **Secrets via env/file, never argv.** Follow the existing `resolveAdminToken` / `resolveToken`
+  / `readPassphrase` patterns.
+- **At-rest stores are atomic + `0600`** (temp-file → `ATOMIC_MOVE` → `0600`; mini-idp's
+  `JsonStore`, mini-kms's `Keystore`). Integrity-protect metadata where the siblings do.
+- **Loopback bind by default.** Exposing anything beyond loopback is an explicit operator decision.
+- Use `System.Logger`, not a third-party logging dependency.
+
+## Build & test
+
+JDK 21+ on `PATH` (the Gradle toolchain is pinned to 21; foojay can auto-download it). There is
+**one root wrapper** — run every Gradle command from the repo root.
+
+```bash
+./gradlew build        # compile + run ALL tests across the whole family — this IS the CI gate
+./gradlew test         # tests only, all modules
+./gradlew :services:mini-idp:core:test                              # one module
+./gradlew :services:mini-kms:core:test --tests "*LocalKeyringTest"  # one class
+./gradlew :services:mini-oidc:installDist                           # runnable launcher (scaffold)
+```
+
+There is **no separate linter/formatter**; `./gradlew build` is the full gate. Tests are JUnit 5.
+Gradle's configuration cache is on (`org.gradle.configuration-cache=true`), so build-script changes
+(including edits to `build-logic`) may need `--no-configuration-cache` while iterating.
+
+**After any change, `./gradlew build` from the repo root must be green and all pre-existing tests
+must still pass.**
+
+## Layout & build structure
+
+Modules are grouped by role under `services/` and `libs/`; the Gradle project path follows the
+directory.
+
+```
+mini-auth/
+├── settings.gradle.kts          # one build: includes every module + pluginManagement.includeBuild(build-logic)
+├── build.gradle.kts             # just the `base` plugin — conventions live in build-logic
+├── gradle/libs.versions.toml    # one catalog for the whole family (Jackson 3.x)
+├── build-logic/                 # included build: the shared convention plugins
+│   └── src/main/kotlin/
+│       ├── miniauth.java-conventions.gradle.kts         # toolchain 21, JUnit 5, -parameters, test deps
+│       ├── miniauth.library-conventions.gradle.kts      # java-conventions + java-library
+│       └── miniauth.application-conventions.gradle.kts  # java-conventions + application
+├── docs/DIRECTION.md
+├── services/                    # deployable front doors
+│   ├── mini-kms/   {core, server, client}   (shipping)
+│   ├── mini-idp/   {core, server}           (shipping)
+│   ├── mini-oidc/                           (scaffold; embeds pk-auth)
+│   ├── mini-gateway/                        (scaffold)
+│   ├── mini-directory/                      (scaffold)
+│   ├── mini-ca/                             (roadmap placeholder)
+│   └── mini-console/                        (roadmap placeholder)
+└── libs/                        # shared libraries (no transport)
+    ├── mini-token/                          (scaffold)
+    └── mini-policy/                         (scaffold)
+```
+
+| Module | Project path | Type | Status |
+| --- | --- | --- | --- |
+| mini-kms | `:services:mini-kms:core/server/client` | service | **shipping** (§ below) |
+| mini-idp | `:services:mini-idp:core/server` | service | **shipping** (§ below) |
+| mini-oidc | `:services:mini-oidc` | service (application) | scaffold — embeds pk-auth |
+| mini-gateway | `:services:mini-gateway` | service (application) | scaffold |
+| mini-directory | `:services:mini-directory` | service (application) | scaffold |
+| mini-ca | `:services:mini-ca` | service (future) | roadmap placeholder (no logic) |
+| mini-console | `:services:mini-console` | service (future) | roadmap placeholder (no logic) |
+| mini-token | `:libs:mini-token` | library | scaffold |
+| mini-policy | `:libs:mini-policy` | library | scaffold |
+
+- **Convention plugins, not `subprojects {}`.** The shared Java conventions (JDK 21 toolchain,
+  Maven Central, JUnit 5 + the common test stack, the `-parameters` flag) live in the `build-logic`
+  included build and are applied per-module by id: `id("miniauth.library-conventions")` for
+  libraries and the I/O-free `core`s, `id("miniauth.application-conventions")` for runnable
+  services. The empty grouping projects (`:services`, `:libs`) stay inert.
+- **Editing `build-logic`:** keep its plugin descriptors valid by building the whole repo. One
+  sharp edge: **do not put backticks in a comment that precedes a `plugins {}` block** in any
+  `*.gradle.kts` — Gradle's lightweight prescan of that block can be derailed by backtick-quoted
+  text in the comment, and the plugin silently fails to apply.
+- **Base package** is `com.codeheadsystems.<mini>` (e.g. `com.codeheadsystems.minitoken`). The
+  package names are independent of the directory grouping — they were **not** renamed when modules
+  moved under `services/` / `libs/`.
+- **Use the shared version catalog** (`gradle/libs.versions.toml`) — never pin a version inline.
+- **`-parameters` is required family-wide** (set in `miniauth.java-conventions`): Jackson binds
+  records (protocol/keystore/store/claim DTOs) by constructor parameter name.
+- **Jackson 3.x (`tools.jackson.*`)** everywhere. Mappers are immutable — build with
+  `JsonMapper.builder()…build()` (no instance `enable`/`configure`); read/write throw the
+  **unchecked** `tools.jackson.core.JacksonException`. Only `jackson-annotations` stays on
+  `com.fasterxml.jackson.annotation`, so `@JsonProperty`/`@JsonInclude`/`@JsonCreator` imports are
+  unchanged. YAML uses `tools.jackson.dataformat.yaml.YAMLMapper`.
+- **pk-auth is external, not vendored** — `com.codeheadsystems:pk-auth-core` from Maven Central
+  (mini-oidc's passkey credential layer).
+
+## Working in this repo
+
+- **Read `docs/DIRECTION.md` and the relevant existing module(s) before writing code.** The
+  runtime relationships (both issuers go through mini-token; everything decides through mini-policy;
+  mini-token's signing keys are eventually wrapped by mini-kms; mini-directory is the identity
+  source of truth) shape where new code belongs.
+- **Refactors are behavior-preserving** — structure only, no functional change; the test suite
+  must still pass unchanged.
+- **The token-claim contract aligns across the family.** mini-idp's `grants` claim maps onto
+  mini-kms's authorization model (`sub → Principal.id`, `grants.control → Principal.admin`,
+  `grants.groups[] → KeyAuthorizationPolicy`); `auth/KeyOperation` string values are the contract —
+  don't rename them. Preserve this mapping in mini-token / mini-policy work.
+- **Don't duplicate foundation code.** Argon2 hashing, the atomic-`0600` JSON store, base64url,
+  constant-time compare, and the `ServerConfig` env/file token pattern exist in *both* shipping
+  services today. They are catalogued as **`mini-common` extraction candidates** in
+  `docs/DIRECTION.md` — when adding similar machinery, prefer extending one of those (and note the
+  duplication) over writing a third copy. The extraction itself is a planned, separate step.
+
+---
+
+# Service: mini-kms (`services/mini-kms`)
+
+mini-kms is an **educational** single-machine Key Management Service in Java: envelope encryption
+with rotatable keys served to local processes over sockets. Heavily commented on purpose — the
+code is meant to be *read* to learn how a KMS works. Real, sound crypto (Argon2id, AES-256-GCM/AEAD),
+explicitly not production-audited.
+
+**Run it locally.** Server reads the passphrase with no echo (`Console.readPassword`), or
+`MINIKMS_PASSPHRASE` when there's no TTY. Both tokens come from env vars or files, **never CLI args**.
+
+```bash
+export MINIKMS_API_TOKEN="$(openssl rand -hex 32)"      # data plane
+export MINIKMS_ADMIN_TOKEN="$(openssl rand -hex 32)"    # control plane
+./gradlew :services:mini-kms:server:installDist :services:mini-kms:client:installDist
+services/mini-kms/server/build/install/server/bin/server --tcp-port 9123 --keystore ~/.mini-kms/keystore.json
+services/mini-kms/client/build/install/client/bin/client   --tcp 127.0.0.1:9123 health      # data-plane CLI
+services/mini-kms/client/build/install/client/bin/kms-admin --tcp 127.0.0.1:9123 list-keys  # control-plane CLI
+```
+
+**Architecture.** Three modules under base package `com.codeheadsystems.minikms` (paths
+`:services:mini-kms:core/server/client`):
+
+- **`core`** — all crypto + key management, **no socket/transport/CLI code**. Owns the
+  wire-protocol DTOs (shared by server + client), the envelope formats, the keyring, and the
+  request handler. This I/O-free separation is load-bearing.
+- **`server`** — the socket daemon (`ServerMain`); depends on `core`.
+- **`client`** — `KmsClient` library plus two CLIs (`ClientMain` = data plane, `KeyringAdminMain` =
+  control plane); depends on `core`. The `client` build registers a second launcher (`kms-admin`)
+  in the same distribution — preserve that when touching its build file.
+
+- **Two planes, two tokens.** Every `RequestType` is tagged `DATA` or `CONTROL` (`RequestPlane`).
+  `KmsRequestHandler` (in `core`) routes by plane and validates the matching token — the **API
+  token** for data ops, a **separate admin token** for control ops. Data-plane ops also pass
+  through `KeyAuthorizationPolicy` per key group; the shipped `AllowAllPolicy` is the documented
+  seam for per-client authz later (the thing `mini-policy` generalizes).
+- **The two seams.** `KmsRequestHandler` depends only on `MasterKeyProvider` (data:
+  `wrap/unwrap/encrypt/decrypt/keyIdOf`) and `KeyringManager` (control:
+  `create/rotate/list/disable/enable/destroy`), both implemented by `LocalKeyring`. Each ciphertext
+  carries its own `kek_id` inside the opaque blob, so a remote/HSM provider can drop in later.
+  **Preserve this boundary** — don't make the handler reach past these interfaces.
+- **Key hierarchy.** `passphrase --Argon2id+salt--> root key --wraps--> KEK versions --wrap--> DEKs
+  --AES-GCM--> data`. Root key and KEKs exist only as `byte[]` and are zeroed on shutdown
+  (`LocalKeyring.close()`). `DestroyVersion` is intentionally irreversible (crypto-shredding).
+- **Crypto & formats.** `crypto/AesGcm` is the **only** place raw symmetric crypto happens
+  (nonces always fresh-random, never caller-supplied). Three nested binary formats: `EnvelopeFormat`,
+  `KekEnvelope` (client-facing blob), client-only `FileEnvelope` (`MKE1`). The keystore
+  (`keystore.json`, `0600`) holds an HMAC over all metadata (`KeystoreIntegrity`); the MAC is
+  **required** on load (tampering is rejected; pre-MAC keystores fail to load).
+- **Transport.** Loopback TCP + a Unix domain socket (`0600` in a `0700` dir); each connection on a
+  virtual thread. Newline-delimited JSON, bounded per frame; a `Semaphore` connection cap + an
+  idle-timeout watchdog. `ConnectionHandler` is transport-agnostic.
+- **Conventions.** `core` stays I/O-free (no sockets/files beyond `Keystore`/CLI). Any keyring/AEAD
+  failure flattens to one `DecryptionFailed`. Secrets via `resolveToken`/`readPassphrase`
+  (passphrases as `char[]`, zeroed).
+- **Docs.** `services/mini-kms/README.md` (architecture, formats, glossary) and
+  `services/mini-kms/docs/security/` (review findings: connection exhaustion, keystore integrity;
+  one open item: loopback-TCP local exposure).
+
+---
+
+# Service: mini-idp (`services/mini-idp`)
+
+mini-idp is an **educational** standalone identity provider in Java. It registers clients, issues
+short-lived Ed25519-signed JWT access tokens via the OAuth 2.0 **client-credentials** grant, and
+publishes its public signing keys (JWKS) so a verifier can validate tokens **offline**. Real crypto
+(Argon2id for secrets, Ed25519/EdDSA for signatures), not production-audited. **It does not depend
+on mini-kms** at the code level — it mirrors its conventions and targets its eventual verification
+contract.
+
+**Run it locally.** The bootstrap admin token comes from an env var or a file, **never a CLI arg,
+and is never logged**.
+
+```bash
+export MINIIDP_ADMIN_TOKEN="$(openssl rand -hex 32)"
+./gradlew :services:mini-idp:server:installDist
+services/mini-idp/server/build/install/server/bin/server --port 8455 --data-dir ~/.mini-idp
+# Register a client (admin), then exchange credentials for a token; browse the API at /docs.
+```
+
+**Architecture.** Two modules under base package `com.codeheadsystems.miniidp` (paths
+`:services:mini-idp:core/server`):
+
+- **`core`** — identity model, crypto, token machinery, **no HTTP/transport code**. Owns the
+  authorization model, Argon2id secret hashing, Ed25519 keys, the hand-rolled JWS/JWT, the JWKS
+  model, the JSON file stores, and the services on them.
+- **`server`** — the HTTP daemon (`ServerMain`, JDK `com.sun.net.httpserver.HttpServer` on
+  loopback), router, handlers, config, and the OpenAPI spec + vendored Swagger UI. Depends on `core`.
+
+- **The token contract.** `server/src/main/resources/openapi.yaml` (served at `/openapi.yaml`,
+  `/openapi.json`, `/docs`) is authoritative. The `grants` claim (from `token/GrantsClaim` over
+  `auth/Authorization`) maps to mini-kms: `sub → Principal.id`, `grants.control → Principal.admin`,
+  `grants.groups[] → KeyAuthorizationPolicy`. `auth/KeyOperation` is a **deliberate mirror** of
+  mini-kms's enum — the string values are the contract, do not rename them. A `cnf` claim is
+  reserved (RFC 7800) but not enforced yet.
+- **Crypto & formats (hand-rolled bits).** Ed25519 via the JDK only (`crypto/Ed25519Keys`). The
+  JWS is hand-rolled in `token/Jws` (not a JOSE lib): `base64url(header).base64url(payload).
+  base64url(sig)`; `token/TokenVerifier` is the reference offline verifier (signature first, then
+  `iss`/`aud`/time/revocation). Client secrets hashed with Argon2id (`secret/Argon2SecretHasher`),
+  verified in constant time.
+- **Persistence & rotation.** All state is JSON via `store/JsonStore` (atomic temp-file +
+  `ATOMIC_MOVE` + `0600`). Private signing keys in `signing-keys.json` (`0600`); the marker in
+  `model/SigningKeyRecord` notes a real deployment would wrap them under a KMS (the eventual
+  mini-kms integration). Rotation (`service/SigningKeyService`) keeps retired keys in the JWKS
+  (`retiredKeyRetention`, = 2× token TTL) so in-flight tokens still verify.
+- **Conventions.** `core` stays HTTP-free (composition root is `server/IdpServer`). The token
+  endpoint returns one generic `invalid_client` for any auth failure. Admin token via
+  `resolveAdminToken`. **The OpenAPI spec is the contract** — `OpenApiContractTest` fails if a
+  documented path/method doesn't resolve on the live server, so keep `openapi.yaml` and the routes
+  in `ApiHandlers` in sync.
+- **Docs.** `services/mini-idp/README.md` — endpoint list, token claim schema, JWKS/discovery URLs.

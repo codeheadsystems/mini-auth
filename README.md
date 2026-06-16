@@ -29,8 +29,8 @@ adds the connective tissue (`mini-token`, `mini-policy`) and the new human-facin
 
 | Mini | Purpose | Type | Status |
 | --- | --- | --- | --- |
-| [mini-kms](mini-kms) | Envelope-encryption KMS; the eventual vault wrapping other services' signing keys. | service | **shipping** |
-| [mini-idp](mini-idp) | Machine identity: OAuth2 client-credentials → Ed25519 JWT + JWKS. | service | **shipping** |
+| [mini-kms](services/mini-kms) | Envelope-encryption KMS; the eventual vault wrapping other services' signing keys. | service | **shipping** |
+| [mini-idp](services/mini-idp) | Machine identity: OAuth2 client-credentials → Ed25519 JWT + JWKS. | service | **shipping** |
 | `mini-token` | Shared token plane: JWS, JWKS, key rotation, revocation, audit. | library | scaffolded |
 | `mini-policy` | Generalized `(principal, resource, action) → allow/deny` decision function. | library | scaffolded |
 | `mini-oidc` | Human SSO / OpenID Provider (auth-code + PKCE); embeds **pk-auth** passkeys. | service | scaffolded |
@@ -47,27 +47,34 @@ mini-kms — the recursive integration; mini-directory is the identity source of
 
 ## Layout
 
+Modules are grouped by role under `services/` (deployable front doors) and `libs/` (shared
+libraries); the Gradle project path follows the directory.
+
 ```
 mini-auth/
-├── settings.gradle.kts     # one build: include mini-kms:*, mini-idp:* + the new modules
-├── build.gradle.kts        # shared Java conventions applied to every module
-├── gradle/libs.versions.toml   # one catalog for the whole family (Jackson 3.x)
-├── docs/DIRECTION.md        # ← the direction doc
-├── mini-kms/               # vendored: core/ server/ client/  (shipping)
-├── mini-idp/               # vendored: core/ server/          (shipping)
-├── mini-token/             # library  (scaffold)
-├── mini-policy/            # library  (scaffold)
-├── mini-oidc/              # service  (scaffold; depends on pk-auth, mini-token, mini-policy)
-├── mini-gateway/           # service  (scaffold; depends on mini-token, mini-policy)
-├── mini-directory/         # service  (scaffold; depends on mini-policy)
-├── mini-ca/                # roadmap placeholder (no logic)
-└── mini-console/           # roadmap placeholder (no logic)
+├── settings.gradle.kts          # one build: includes every module + build-logic (convention plugins)
+├── build.gradle.kts             # just the `base` plugin — conventions live in build-logic/
+├── gradle/libs.versions.toml    # one catalog for the whole family (Jackson 3.x)
+├── build-logic/                 # included build: miniauth.java/library/application-conventions
+├── docs/DIRECTION.md            # ← the direction doc
+├── services/                    # deployable front doors
+│   ├── mini-kms/                #   core/ server/ client/  (shipping)
+│   ├── mini-idp/                #   core/ server/          (shipping)
+│   ├── mini-oidc/               #   scaffold; depends on pk-auth, mini-token, mini-policy
+│   ├── mini-gateway/            #   scaffold; depends on mini-token, mini-policy
+│   ├── mini-directory/          #   scaffold; depends on mini-policy
+│   ├── mini-ca/                 #   roadmap placeholder (no logic)
+│   └── mini-console/            #   roadmap placeholder (no logic)
+└── libs/                        # shared libraries (no transport)
+    ├── mini-token/              #   library (scaffold)
+    └── mini-policy/             #   library (scaffold)
 ```
 
-Gradle project paths follow the directories: `:mini-kms:core`, `:mini-idp:server`, etc. Each
-new service/library uses the same conventions as the vendored minis: base package
-`com.codeheadsystems.<mini>` (e.g. `com.codeheadsystems.minitoken`), Kotlin-DSL Gradle, a JDK 21
-toolchain pinned via the root build, JUnit 5, and the same Jackson 3.x / Bouncy Castle versions.
+Gradle project paths follow the directories: `:services:mini-kms:core`, `:services:mini-idp:server`,
+`:libs:mini-token`, etc. Base **packages are unchanged** by the grouping — each module keeps
+`com.codeheadsystems.<mini>` (e.g. `com.codeheadsystems.minitoken`). Every module uses the shared
+convention plugins from `build-logic/` (base package aside): Kotlin-DSL Gradle, a JDK 21 toolchain,
+JUnit 5, and the same Jackson 3.x / Bouncy Castle versions from the one catalog.
 
 ## Building
 
@@ -76,7 +83,7 @@ Requires a JDK 21+ on `PATH` (the toolchain is pinned to 21; foojay can auto-dow
 ```bash
 ./gradlew build        # compile + test EVERYTHING: the new modules AND vendored mini-kms + mini-idp
 ./gradlew test         # tests only, all modules
-./gradlew :mini-oidc:installDist   # a runnable launcher for one scaffolded service
+./gradlew :services:mini-oidc:installDist   # a runnable launcher for one scaffolded service
 ```
 
 The first build resolves `pk-auth-core` from Maven Central (for `mini-oidc`) and the Jackson 3.x
@@ -85,10 +92,13 @@ only print a status banner — they do not yet bind a server (by design).
 
 ### Build aggregation, in brief
 
-This is a single **monorepo** Gradle build: mini-kms and mini-idp were pulled in as nested module
-groups (`include("mini-kms:core")`, …) so `./gradlew build` covers the whole family with no
-composite or submodule machinery, and the family standardized on **Jackson 3.x** (`tools.jackson.*`,
-matching pk-auth's transitive Jackson). Full rationale and the migration notes: the
+This is a single **monorepo** Gradle build: mini-kms and mini-idp — two formerly-independent Gradle
+builds — were pulled in and unified under one wrapper, one `settings.gradle.kts`, one version
+catalog, and one set of **convention plugins** (the `build-logic/` included build), so
+`./gradlew build` covers the whole family with no composite or submodule machinery. The family is
+standardized on **Jackson 3.x** (`tools.jackson.*`, matching pk-auth's transitive Jackson) and a
+single CI workflow (`.github/workflows/build.yml`) runs `./gradlew build` on every push/PR. Full
+rationale, the layout, and the `mini-common` extraction candidates: the
 [Build aggregation](docs/DIRECTION.md#build-aggregation) section of the direction doc.
 
 ## Status & intent
