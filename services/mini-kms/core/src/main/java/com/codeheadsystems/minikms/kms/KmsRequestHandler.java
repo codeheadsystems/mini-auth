@@ -1,9 +1,6 @@
 package com.codeheadsystems.minikms.kms;
 
 import com.codeheadsystems.minikms.auth.ApiTokenAuthenticator;
-import com.codeheadsystems.minikms.auth.KeyAuthorizationPolicy;
-import com.codeheadsystems.minikms.auth.KeyOperation;
-import com.codeheadsystems.minikms.auth.Principal;
 import com.codeheadsystems.minikms.crypto.AeadException;
 import com.codeheadsystems.minikms.keyring.KeyGroupInfo;
 import com.codeheadsystems.minikms.keyring.KeyUnavailableException;
@@ -16,6 +13,10 @@ import com.codeheadsystems.minikms.protocol.KmsRequest;
 import com.codeheadsystems.minikms.protocol.KmsResponse;
 import com.codeheadsystems.minikms.protocol.RequestPlane;
 import com.codeheadsystems.minikms.protocol.RequestType;
+import com.codeheadsystems.minipolicy.Action;
+import com.codeheadsystems.minipolicy.PolicyEngine;
+import com.codeheadsystems.minipolicy.Principal;
+import com.codeheadsystems.minipolicy.Resource;
 import java.util.Base64;
 import java.util.List;
 
@@ -26,7 +27,7 @@ import java.util.List;
  * <ul>
  *   <li><b>DATA PLANE</b> ({@code GenerateDataKey}/{@code Encrypt}/{@code Decrypt}/
  *       {@code ReEncrypt}/{@code Health}) is authenticated with the <b>API token</b>
- *       and authorized per key group by the {@link KeyAuthorizationPolicy}.</li>
+ *       and authorized per key group by the {@link PolicyEngine}.</li>
  *   <li><b>CONTROL PLANE</b> ({@code Create/Rotate/List/Disable/Enable/Destroy})
  *       is authenticated with the <b>admin token</b>.</li>
  * </ul>
@@ -40,11 +41,24 @@ import java.util.List;
  */
 public class KmsRequestHandler {
 
+  // The two shared identities mini-kms presents to the policy engine while authentication is a
+  // single shared token per plane (formerly mini-kms's auth/Principal constants). The data-plane
+  // ops below authorize against SHARED_DATA_CLIENT; control-plane ops are gated by the admin token.
+  private static final Principal SHARED_DATA_CLIENT = Principal.of("shared-data-client");
+  private static final Principal SHARED_ADMIN = Principal.admin("shared-admin");
+
+  // The data-plane operations subject to per-key-group authorization, as mini-policy Actions. The
+  // string values are the former KeyOperation enum names, kept stable as the authorization vocab.
+  private static final Action GENERATE_DATA_KEY = Action.of("GENERATE_DATA_KEY");
+  private static final Action ENCRYPT = Action.of("ENCRYPT");
+  private static final Action DECRYPT = Action.of("DECRYPT");
+  private static final Action RE_ENCRYPT = Action.of("RE_ENCRYPT");
+
   private final KmsService kmsService;
   private final KeyringManager keyringManager;
   private final ApiTokenAuthenticator dataAuthenticator;
   private final ApiTokenAuthenticator adminAuthenticator;
-  private final KeyAuthorizationPolicy authorizationPolicy;
+  private final PolicyEngine authorizationPolicy;
 
   /**
    * @param kmsService          data-plane operations.
@@ -56,7 +70,7 @@ public class KmsRequestHandler {
   public KmsRequestHandler(final KmsService kmsService, final KeyringManager keyringManager,
                            final ApiTokenAuthenticator dataAuthenticator,
                            final ApiTokenAuthenticator adminAuthenticator,
-                           final KeyAuthorizationPolicy authorizationPolicy) {
+                           final PolicyEngine authorizationPolicy) {
     this.kmsService = kmsService;
     this.keyringManager = keyringManager;
     this.dataAuthenticator = dataAuthenticator;
@@ -82,7 +96,7 @@ public class KmsRequestHandler {
     if (!authenticator.isValid(request.token())) {
       return KmsResponse.error(ErrorCode.AUTH_FAILED, control ? "invalid admin token" : "invalid API token");
     }
-    final Principal principal = control ? Principal.SHARED_ADMIN : Principal.SHARED_DATA_CLIENT;
+    final Principal principal = control ? SHARED_ADMIN : SHARED_DATA_CLIENT;
 
     try {
       return switch (type) {
@@ -115,7 +129,7 @@ public class KmsRequestHandler {
 
   private KmsResponse generateDataKey(final KmsRequest request, final Principal principal) {
     final String group = groupOrDefault(request.keyId());
-    final KmsResponse denied = authorize(principal, group, KeyOperation.GENERATE_DATA_KEY);
+    final KmsResponse denied = authorize(principal, group, GENERATE_DATA_KEY);
     if (denied != null) {
       return denied;
     }
@@ -127,7 +141,7 @@ public class KmsRequestHandler {
 
   private KmsResponse encrypt(final KmsRequest request, final Principal principal) {
     final String group = groupOrDefault(request.keyId());
-    final KmsResponse denied = authorize(principal, group, KeyOperation.ENCRYPT);
+    final KmsResponse denied = authorize(principal, group, ENCRYPT);
     if (denied != null) {
       return denied;
     }
@@ -140,7 +154,7 @@ public class KmsRequestHandler {
     final byte[] ciphertext = decodeRequired(request.ciphertext(), "ciphertext");
     final byte[] aad = decodeOptional(request.aad());
     final String sourceGroup = kmsService.keyIdOf(ciphertext).keyGroupId();
-    final KmsResponse denied = authorize(principal, sourceGroup, KeyOperation.DECRYPT);
+    final KmsResponse denied = authorize(principal, sourceGroup, DECRYPT);
     if (denied != null) {
       return denied;
     }
@@ -153,11 +167,11 @@ public class KmsRequestHandler {
     final String destGroup = groupOrDefault(request.keyId());
     // Must be allowed to decrypt the source group AND encrypt under the destination group.
     final KmsResponse deniedSrc = authorize(principal, kmsService.keyIdOf(ciphertext).keyGroupId(),
-        KeyOperation.DECRYPT);
+        DECRYPT);
     if (deniedSrc != null) {
       return deniedSrc;
     }
-    final KmsResponse deniedDest = authorize(principal, destGroup, KeyOperation.RE_ENCRYPT);
+    final KmsResponse deniedDest = authorize(principal, destGroup, RE_ENCRYPT);
     if (deniedDest != null) {
       return deniedDest;
     }
@@ -181,9 +195,15 @@ public class KmsRequestHandler {
 
   // ---- shared helpers ----
 
-  /** @return an UNAUTHORIZED response if denied, or {@code null} if allowed. */
-  private KmsResponse authorize(final Principal principal, final String group, final KeyOperation op) {
-    if (!authorizationPolicy.isAllowed(principal, group, op)) {
+  /**
+   * Ask the policy engine whether {@code principal} may perform {@code action} on the key group.
+   * The key group is the {@link Resource}; the response on denial is unchanged from before the
+   * mini-policy extraction (same {@link ErrorCode#UNAUTHORIZED} and message).
+   *
+   * @return an UNAUTHORIZED response if denied, or {@code null} if allowed.
+   */
+  private KmsResponse authorize(final Principal principal, final String group, final Action action) {
+    if (!authorizationPolicy.decide(principal, action, Resource.of(group)).isAllowed()) {
       return KmsResponse.error(ErrorCode.UNAUTHORIZED, "not permitted for key group " + group);
     }
     return null;

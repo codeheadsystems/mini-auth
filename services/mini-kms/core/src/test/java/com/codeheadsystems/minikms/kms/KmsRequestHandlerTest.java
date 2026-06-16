@@ -4,15 +4,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.codeheadsystems.minikms.auth.AllowAllPolicy;
 import com.codeheadsystems.minikms.auth.ApiTokenAuthenticator;
-import com.codeheadsystems.minikms.auth.KeyAuthorizationPolicy;
 import com.codeheadsystems.minikms.keyring.LocalKeyring;
 import com.codeheadsystems.minikms.master.Argon2Settings;
 import com.codeheadsystems.minikms.protocol.ErrorCode;
 import com.codeheadsystems.minikms.protocol.KmsRequest;
 import com.codeheadsystems.minikms.protocol.KmsResponse;
 import com.codeheadsystems.minikms.protocol.RequestType;
+import com.codeheadsystems.minipolicy.AllowAllPolicyEngine;
+import com.codeheadsystems.minipolicy.Decision;
+import com.codeheadsystems.minipolicy.PolicyEngine;
 import java.nio.file.Path;
 import java.util.Base64;
 import org.junit.jupiter.api.AfterEach;
@@ -35,10 +36,10 @@ class KmsRequestHandlerTest {
   @BeforeEach
   void setUp() {
     keyring = LocalKeyring.bootstrap(tempDir.resolve("ks.json"), "pw".toCharArray(), FAST);
-    handler = newHandler(new AllowAllPolicy());
+    handler = newHandler(new AllowAllPolicyEngine());
   }
 
-  private KmsRequestHandler newHandler(final KeyAuthorizationPolicy policy) {
+  private KmsRequestHandler newHandler(final PolicyEngine policy) {
     return new KmsRequestHandler(new KmsService(keyring), keyring,
         new ApiTokenAuthenticator(API_TOKEN), new ApiTokenAuthenticator(ADMIN_TOKEN), policy);
   }
@@ -126,7 +127,8 @@ class KmsRequestHandlerTest {
   @Test
   void authorizationPolicyCanDenyAGroup() {
     // Deny everything except the "default" group.
-    handler = newHandler((principal, group, op) -> group.equals("default"));
+    handler = newHandler((principal, action, resource) ->
+        resource.value().equals("default") ? Decision.ALLOW : Decision.DENY);
     assertEquals(ErrorCode.UNAUTHORIZED,
         handler.handle(KmsRequest.encrypt(API_TOKEN, "secret-group",
             Base64.getEncoder().encodeToString(new byte[]{1}), null)).errorCode());

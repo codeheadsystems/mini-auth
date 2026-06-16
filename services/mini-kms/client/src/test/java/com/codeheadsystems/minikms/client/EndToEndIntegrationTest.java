@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.codeheadsystems.minikms.auth.AllowAllPolicy;
 import com.codeheadsystems.minikms.auth.ApiTokenAuthenticator;
 import com.codeheadsystems.minikms.keyring.LocalKeyring;
 import com.codeheadsystems.minikms.kms.DataKey;
@@ -15,6 +14,7 @@ import com.codeheadsystems.minikms.kms.KmsService;
 import com.codeheadsystems.minikms.protocol.ErrorCode;
 import com.codeheadsystems.minikms.server.KmsServer;
 import com.codeheadsystems.minikms.server.ServerConfig;
+import com.codeheadsystems.minipolicy.AllowAllPolicyEngine;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Map;
@@ -49,7 +49,7 @@ class EndToEndIntegrationTest {
         "passphrase".toCharArray(), new com.codeheadsystems.minikms.master.Argon2Settings(2048, 1, 1));
     final KmsRequestHandler handler = new KmsRequestHandler(
         new KmsService(keyring), keyring,
-        new ApiTokenAuthenticator(API_TOKEN), new ApiTokenAuthenticator(ADMIN_TOKEN), new AllowAllPolicy());
+        new ApiTokenAuthenticator(API_TOKEN), new ApiTokenAuthenticator(ADMIN_TOKEN), new AllowAllPolicyEngine());
     final ServerConfig config = ServerConfig.resolve(
         new String[]{"--tcp-port", "0", "--unix-socket", unixSocket.toString()}, Map.of());
     server = new KmsServer(config, handler);

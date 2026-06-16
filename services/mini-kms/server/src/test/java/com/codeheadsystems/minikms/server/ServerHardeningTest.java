@@ -3,12 +3,12 @@ package com.codeheadsystems.minikms.server;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.codeheadsystems.minikms.auth.AllowAllPolicy;
 import com.codeheadsystems.minikms.auth.ApiTokenAuthenticator;
 import com.codeheadsystems.minikms.keyring.LocalKeyring;
 import com.codeheadsystems.minikms.kms.KmsRequestHandler;
 import com.codeheadsystems.minikms.kms.KmsService;
 import com.codeheadsystems.minikms.master.Argon2Settings;
+import com.codeheadsystems.minipolicy.AllowAllPolicyEngine;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.file.Path;
@@ -31,7 +31,7 @@ class ServerHardeningTest {
         tempDir.resolve("keystore.json"), "pw".toCharArray(), new Argon2Settings(2048, 1, 1));
     final KmsRequestHandler handler = new KmsRequestHandler(
         new KmsService(keyring), keyring,
-        new ApiTokenAuthenticator("data"), new ApiTokenAuthenticator("admin"), new AllowAllPolicy());
+        new ApiTokenAuthenticator("data"), new ApiTokenAuthenticator("admin"), new AllowAllPolicyEngine());
     final String[] base = {"--tcp-port", "0", "--no-unix"};
     final String[] flags = new String[base.length + extraFlags.length];
     System.arraycopy(base, 0, flags, 0, base.length);

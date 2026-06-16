@@ -1,7 +1,7 @@
 package com.codeheadsystems.minipolicy;
 
 /**
- * The outcome of evaluating a {@link PolicyRequest}: the access is either permitted or refused.
+ * The outcome of a {@link PolicyEngine} decision: the access is either permitted or refused.
  *
  * <p>Deliberately binary (allow / deny) to match mini-kms's {@code boolean} authorization seam.
  * Any richer outcome (obligations, reasons) can be layered later without changing callers that

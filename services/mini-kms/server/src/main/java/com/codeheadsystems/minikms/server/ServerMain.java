@@ -1,11 +1,11 @@
 package com.codeheadsystems.minikms.server;
 
-import com.codeheadsystems.minikms.auth.AllowAllPolicy;
 import com.codeheadsystems.minikms.auth.ApiTokenAuthenticator;
 import com.codeheadsystems.minikms.keyring.LocalKeyring;
 import com.codeheadsystems.minikms.kms.KmsRequestHandler;
 import com.codeheadsystems.minikms.kms.KmsService;
 import com.codeheadsystems.minikms.master.WrongPassphraseException;
+import com.codeheadsystems.minipolicy.AllowAllPolicyEngine;
 import java.io.Console;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -81,7 +81,7 @@ public final class ServerMain {
         keyring,
         new ApiTokenAuthenticator(apiToken),
         new ApiTokenAuthenticator(adminToken),
-        new AllowAllPolicy());
+        new AllowAllPolicyEngine());
     final KmsServer server = new KmsServer(config, requestHandler);
 
     final CountDownLatch shutdown = new CountDownLatch(1);
