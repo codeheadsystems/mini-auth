@@ -64,7 +64,7 @@ Every mini, its one-line purpose, whether it is a library or a service, and its 
 | **mini-policy** | Generalized authorization decision function: `(principal, resource, action) → allow/deny`. Generalizes mini-kms's `KeyAuthorizationPolicy`. | library | **scaffolded** |
 | **mini-oidc** | Human SSO / OpenID Provider: authorization-code + PKCE, ID + access tokens, browser SSO sessions, login/consent UI. Uses **pk-auth** for the passkey credential layer. | service | **scaffolded** |
 | **mini-gateway** | Forward-auth endpoint for a reverse proxy (Traefik / Caddy / nginx `auth_request`) to gate apps with no native auth. | service | **scaffolded** |
-| **mini-directory** | The single identity source of truth: users, groups, roles, service accounts, and their grant mappings. | service | **scaffolded** |
+| **mini-directory** | The single identity source of truth: humans, groups, roles, service accounts, and their grant mappings; resolves any account to a mini-policy `Principal` + expanded grants. | service | **shipping** (standalone; issuers not yet wired to read from it) |
 | **pk-auth** | Passkeys-first auth library set, published on Maven Central under `com.codeheadsystems`. Consumed as a normal dependency — **not vendored**. | external library | **shipping (external)** |
 | **mini-ca** | Small internal certificate authority for mTLS between the minis and workload identity in the homelab. | service (future) | **roadmap** (placeholder module) |
 | **mini-console** | Optional unified admin UI over the family. | service (future) | **roadmap** (placeholder module) |
@@ -247,9 +247,15 @@ clear second consumer to pin them against.
 behind mini-kms's `KeyAuthorizationPolicy` seam first (it already has the right shape), then behind
 the issuers' scope checks.
 
-**Phase 3 — Stand up the directory.** Give **mini-directory** a real identity model (users, groups,
-roles, service accounts) and a read API; begin resolving grants from it (see the open question
-above).
+**Phase 3 — Stand up the directory.** *Standalone service: done.* **mini-directory** now has a real
+identity model (humans, groups, roles, service accounts), an admin CRUD API behind the family's
+bootstrap admin token, atomic-`0600` persistence, an OpenAPI spec + vendored Swagger UI, and the
+defining capability: resolving any account into a mini-policy `Principal` plus its fully-expanded,
+de-duplicated grants (roles expand to grants; group memberships are inherited). Service-account
+secrets are Argon2id-hashed at rest. What remains is **wiring the issuers to read from it** — mini-idp
+resolving service accounts, mini-oidc resolving humans — and the open question below about folding
+mini-idp's client registry in. That integration is deliberately not done yet; the service stands
+alone today.
 
 **Phase 4 — Human SSO.** Build **mini-oidc**: auth-code + PKCE, ID/access tokens via mini-token,
 SSO sessions, login/consent UI, passkeys via pk-auth, users from mini-directory.

@@ -2,8 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this
 repository. It is the **single** guide for the whole `mini-` family: the umbrella conventions
-first, then a folded-in section per shipping service (mini-kms, mini-idp). There are no
-per-module `CLAUDE.md` files — this is it.
+first, then a folded-in section per shipping service (mini-kms, mini-idp, mini-directory). There are
+no per-module `CLAUDE.md` files — this is it.
 
 > **Read first.** `docs/DIRECTION.md` is the canonical map of the family — the vision, the
 > component catalog, the architecture, the runtime relationships, the roadmap, and the
@@ -100,7 +100,7 @@ mini-auth/
 │   ├── mini-idp/   {core, server}           (shipping)
 │   ├── mini-oidc/                           (scaffold; embeds pk-auth)
 │   ├── mini-gateway/                        (scaffold)
-│   ├── mini-directory/                      (scaffold)
+│   ├── mini-directory/                      (shipping; identity source of truth, standalone)
 │   ├── mini-ca/                             (roadmap placeholder)
 │   └── mini-console/                        (roadmap placeholder)
 └── libs/                        # shared libraries (no transport)
@@ -114,7 +114,7 @@ mini-auth/
 | mini-idp | `:services:mini-idp:core/server` | service | **shipping** (§ below) |
 | mini-oidc | `:services:mini-oidc` | service (application) | scaffold — embeds pk-auth |
 | mini-gateway | `:services:mini-gateway` | service (application) | scaffold |
-| mini-directory | `:services:mini-directory` | service (application) | scaffold |
+| mini-directory | `:services:mini-directory` | service (application) | **shipping** (§ below) |
 | mini-ca | `:services:mini-ca` | service (future) | roadmap placeholder (no logic) |
 | mini-console | `:services:mini-console` | service (future) | roadmap placeholder (no logic) |
 | mini-token | `:libs:mini-token` | library | **shipping** (token plane extracted from mini-idp) |
@@ -282,3 +282,56 @@ services/mini-idp/server/build/install/server/bin/server --port 8455 --data-dir 
   documented path/method doesn't resolve on the live server, so keep `openapi.yaml` and the routes
   in `ApiHandlers` in sync.
 - **Docs.** `services/mini-idp/README.md` — endpoint list, token claim schema, JWKS/discovery URLs.
+
+---
+
+# Service: mini-directory (`services/mini-directory`)
+
+mini-directory is the **single identity source of truth** for the family: it owns **humans**,
+**service accounts**, **groups**, and **roles**, and the grant mappings between them. Its defining
+job is **resolution** — turning any stored account into a **mini-policy `Principal` plus a
+fully-expanded, de-duplicated set of `(action, resource)` grants** (roles expand to grants; group
+memberships are inherited), which is exactly what a `mini-policy` decision function consumes. It is
+**shipping but standalone**: the issuers do **not** read from it yet (that is Phase 3/4 work; see the
+open client-registry question in `docs/DIRECTION.md`).
+
+**Run it locally.** The bootstrap admin token comes from an env var or a file, **never a CLI arg,
+and is never logged**. Loopback by default.
+
+```bash
+export MINIDIR_ADMIN_TOKEN="$(openssl rand -hex 32)"
+./gradlew :services:mini-directory:installDist
+services/mini-directory/build/install/mini-directory/bin/mini-directory --port 8466 --data-dir ~/.mini-directory
+# Create a role/group/human (admin), then GET /admin/principals/{id}/resolution. Browse /docs.
+```
+
+**Architecture.** One application module under base package `com.codeheadsystems.minidirectory`:
+
+- **`model`** — the records: `Account` (a `HUMAN` or `SERVICE_ACCOUNT`, the resolvable identity),
+  `Group`, `Role`, the flat `GrantSpec` (`{action, resource}`, the JSON-friendly mirror of a
+  mini-policy `Grant`), and `ResolvedPrincipal` (a mini-policy `Principal` + expanded `Grant`s).
+- **`service/DirectoryService`** — the I/O-free heart: CRUD for accounts/groups/roles, assignment,
+  `resolve(id)` (the role/group → grant expansion), and `authenticate(id, secret)` (no-oracle,
+  constant-time, dummy-hash for unknown — mirrors mini-idp's `ClientService`). All methods
+  `synchronized`; persisted on every mutation.
+- **`secret`** — `Argon2SecretHasher`/`SecretHash`/`Argon2Settings`: the family's Argon2id pattern
+  (a `mini-common` candidate), **replicated** here so the service stays standalone. Only
+  service accounts carry a hash; humans carry none.
+- **`store`** — `JsonStore` (atomic temp-file → `ATOMIC_MOVE` → `0600`, the replicated family store)
+  holding one `DirectoryDocument` (`directory.json`: accounts + groups + roles in one atomic file).
+- **`server`** — `ServerMain`/`DirectoryServer` (composition root), `ServerConfig`, `ApiHandlers`,
+  `AdminAuthenticator`, the OpenAPI/Swagger serving, and the reused `http/` router. JDK
+  `HttpServer` on loopback, one virtual thread per request.
+
+- **Reuse over reinvention.** The `server/http` router, `AdminAuthenticator`, `OpenApiDocument`,
+  `SwaggerUiPage`, the Argon2 hasher, and `JsonStore` are deliberate copies of mini-idp's (the
+  documented `mini-common` candidates) so the service is self-contained until that library exists.
+  The decision model is **not** copied — it depends on `:libs:mini-policy` and resolves into its
+  `Principal`/`Grant`/`GrantBasedPolicyEngine` types directly.
+- **Conventions.** Admin API guarded by the bootstrap bearer token (`MINIDIR_ADMIN_TOKEN`).
+  Service-account secrets returned exactly once at creation, hashed at rest, never logged. Loopback
+  bind by default. Id collisions → 409, dangling role/group references → 400. **The OpenAPI spec is
+  the contract** — `OpenApiContractTest` fails if a documented path/method doesn't resolve on the
+  live server, so keep `openapi.yaml` and the routes in `ApiHandlers` in sync.
+- **Docs.** `services/mini-directory/README.md` — the record model, the resolution rule, and the
+  endpoint list.

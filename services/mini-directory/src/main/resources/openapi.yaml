@@ -1,0 +1,572 @@
+openapi: 3.1.0
+info:
+  title: mini-directory
+  version: "1.0.0"
+  description: |
+    **mini-directory** is the single identity source of truth for the mini- family. It owns four
+    kinds of record — **humans**, **service accounts**, **groups**, and **roles** — and the grant
+    mappings between them. Its defining capability is **resolution**: any account resolves to a
+    mini-policy `Principal` plus a fully-expanded, de-duplicated set of `(action, resource)` grants,
+    where roles expand to grants and group memberships are inherited. That resolved shape is exactly
+    what a `mini-policy` decision function consumes.
+
+    This document is the authoritative contract. The admin API (create/list/update/delete
+    principals, groups, and roles; assign roles/grants) is guarded by a bootstrap admin bearer
+    token. Service-account secrets are Argon2id-hashed at rest and returned exactly once, at
+    creation; no other endpoint ever returns secret material.
+
+    mini-oidc (humans) and mini-idp (service accounts) are intended to read identities and grants
+    from here; that wiring is deliberately future work — today mini-directory stands alone.
+servers:
+  - url: http://127.0.0.1:8466
+    description: Default loopback bind address.
+
+tags:
+  - name: principals
+    description: Humans and service accounts — the resolvable identities.
+  - name: groups
+    description: Named bundles of roles + grants that accounts join.
+  - name: roles
+    description: Named bundles of grants. Roles expand to grants on resolution.
+  - name: admin
+    description: Operator API, guarded by the bootstrap admin bearer token.
+  - name: meta
+    description: Health and the served specification.
+
+paths:
+  /health:
+    get:
+      tags: [meta]
+      summary: Liveness check
+      responses:
+        "200":
+          description: The service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+
+  /openapi.yaml:
+    get:
+      tags: [meta]
+      summary: This specification, as YAML
+      responses:
+        "200":
+          description: The OpenAPI document (YAML).
+          content:
+            application/yaml:
+              schema: { type: string }
+
+  /openapi.json:
+    get:
+      tags: [meta]
+      summary: This specification, as JSON
+      responses:
+        "200":
+          description: The OpenAPI document (JSON).
+          content:
+            application/json:
+              schema: { type: object }
+
+  /docs:
+    get:
+      tags: [meta]
+      summary: Swagger UI
+      description: Human-facing Swagger UI rendering this specification (assets are vendored).
+      responses:
+        "200":
+          description: HTML page.
+          content:
+            text/html:
+              schema: { type: string }
+
+  /admin/roles:
+    post:
+      tags: [roles, admin]
+      summary: Create a role
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleRequest" }
+      responses:
+        "201":
+          description: The created role.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      tags: [roles, admin]
+      summary: List roles
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: The roles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Role" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /admin/roles/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [roles, admin]
+      summary: Get a role
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: The role.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [roles, admin]
+      summary: Update a role
+      description: Replaces the role's description and grants.
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleUpdateRequest" }
+      responses:
+        "200":
+          description: The updated role.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [roles, admin]
+      summary: Delete a role
+      security: [{ adminBearer: [] }]
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/groups:
+    post:
+      tags: [groups, admin]
+      summary: Create a group
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupRequest" }
+      responses:
+        "201":
+          description: The created group.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      tags: [groups, admin]
+      summary: List groups
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: The groups.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Group" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /admin/groups/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [groups, admin]
+      summary: Get a group
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: The group.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [groups, admin]
+      summary: Update a group
+      description: Replaces the group's description, roles, and grants.
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupUpdateRequest" }
+      responses:
+        "200":
+          description: The updated group.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [groups, admin]
+      summary: Delete a group
+      security: [{ adminBearer: [] }]
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/humans:
+    post:
+      tags: [principals, admin]
+      summary: Create a human
+      description: Creates a human with an operator-chosen id. Humans hold no secret here.
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateHumanRequest" }
+      responses:
+        "201":
+          description: The created human.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountView" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /admin/service-accounts:
+    post:
+      tags: [principals, admin]
+      summary: Create a service account
+      description: |
+        Creates a service account with a server-generated id and a one-time secret (Argon2id-hashed
+        before storage). The plaintext secret is returned only in this response.
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateServiceAccountRequest" }
+      responses:
+        "201":
+          description: The created service account and its one-time secret.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceAccountCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /admin/principals:
+    get:
+      tags: [principals, admin]
+      summary: List principals
+      description: Lists all accounts (humans + service accounts). Secret material is never returned.
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: The principals.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AccountView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /admin/principals/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [principals, admin]
+      summary: Get a principal
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: The principal.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [principals, admin]
+      summary: Delete a principal
+      security: [{ adminBearer: [] }]
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/principals/{id}/assignment:
+    put:
+      tags: [principals, admin]
+      summary: Assign roles/grants to a principal
+      description: |
+        Replaces the principal's authorization assignment: enabled flag, admin capability, group
+        memberships, assigned roles, and direct grants. Identity and any stored secret are untouched.
+      security: [{ adminBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssignmentRequest" }
+      responses:
+        "200":
+          description: The updated principal.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountView" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/principals/{id}/resolution:
+    get:
+      tags: [principals, admin]
+      summary: Resolve a principal to its effective grants
+      description: |
+        Resolves the account into a mini-policy principal plus its fully-expanded, de-duplicated
+        grants (directly-assigned grants, the grants of assigned roles, and everything inherited via
+        group membership). This is the shape a mini-policy decision function evaluates over.
+      security: [{ adminBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The resolved principal.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResolutionView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    adminBearer:
+      type: http
+      scheme: bearer
+      description: "The bootstrap admin token, presented as `Authorization: Bearer <token>`."
+
+  responses:
+    BadRequest:
+      description: Invalid input, or a reference to a role/group that does not exist.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid admin token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No such record.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: An id that already exists.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      description: OAuth-style error body.
+      properties:
+        error: { type: string }
+        error_description: { type: string }
+      required: [error]
+
+    PrincipalKind:
+      type: string
+      enum: [HUMAN, SERVICE_ACCOUNT]
+
+    GrantSpec:
+      type: object
+      description: |
+        One permission as a flat `(action, resource)` pair, mirroring a mini-policy `Grant`. Either
+        coordinate may be the wildcard `"*"`. An action is a mini-kms `KeyOperation` name today; a
+        resource is a key-group id today.
+      properties:
+        action: { type: string, description: 'Action name, or "*" for any.' }
+        resource: { type: string, description: 'Resource id, or "*" for any.' }
+      required: [action, resource]
+
+    Role:
+      type: object
+      description: A named bundle of grants. Assigning a role grants every permission it carries.
+      properties:
+        id: { type: string }
+        description: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/GrantSpec" }
+      required: [id, grants]
+
+    RoleRequest:
+      type: object
+      properties:
+        id: { type: string }
+        description: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/GrantSpec" }
+      required: [id]
+
+    RoleUpdateRequest:
+      type: object
+      properties:
+        description: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/GrantSpec" }
+
+    Group:
+      type: object
+      description: A named bundle of roles + grants that accounts join to inherit authorization.
+      properties:
+        id: { type: string }
+        description: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/GrantSpec" }
+      required: [id, roles, grants]
+
+    GroupRequest:
+      type: object
+      properties:
+        id: { type: string }
+        description: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/GrantSpec" }
+      required: [id]
+
+    GroupUpdateRequest:
+      type: object
+      properties:
+        description: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/GrantSpec" }
+
+    AccountView:
+      type: object
+      description: An account as returned by the admin API. Never includes secret material.
+      properties:
+        id: { type: string }
+        kind: { $ref: "#/components/schemas/PrincipalKind" }
+        displayName: { type: string }
+        admin: { type: boolean }
+        enabled: { type: boolean }
+        memberOf:
+          type: array
+          items: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/GrantSpec" }
+      required: [id, kind, admin, enabled, memberOf, roles, grants]
+
+    CreateHumanRequest:
+      type: object
+      properties:
+        id: { type: string, description: Operator-chosen id (e.g. a username). }
+        displayName: { type: string }
+        admin: { type: boolean }
+        memberOf:
+          type: array
+          items: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/GrantSpec" }
+      required: [id]
+
+    CreateServiceAccountRequest:
+      type: object
+      properties:
+        displayName: { type: string }
+        admin: { type: boolean }
+        memberOf:
+          type: array
+          items: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/GrantSpec" }
+
+    ServiceAccountCreated:
+      type: object
+      properties:
+        id: { type: string }
+        secret:
+          type: string
+          description: The one-time plaintext secret. Store it now; it is not recoverable later.
+        displayName: { type: string }
+        account: { $ref: "#/components/schemas/AccountView" }
+      required: [id, secret, account]
+
+    AssignmentRequest:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        admin: { type: boolean }
+        memberOf:
+          type: array
+          items: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/GrantSpec" }
+
+    ResolutionView:
+      type: object
+      description: |
+        An account resolved to a mini-policy principal and its effective, flattened grants — the
+        inputs a mini-policy decision function evaluates over.
+      properties:
+        id: { type: string, description: The principal id. }
+        admin: { type: boolean, description: Whether the principal holds the control/admin capability. }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/GrantSpec" }
+      required: [id, admin, grants]
