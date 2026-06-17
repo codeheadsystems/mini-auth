@@ -1,13 +1,14 @@
-package com.codeheadsystems.miniidp.model;
+package com.codeheadsystems.minitoken.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 /**
  * A signing key in the signing-key set, including its private key material.
  *
- * <p>The private key is stored as base64 PKCS#8. The file backing the signing-key set is written
- * 0600 by {@link com.codeheadsystems.miniidp.store.JsonStore}. <b>A real deployment would wrap
- * the private key under a KMS</b> (the eventual recursive integration with mini-kms) rather than
+ * <p>The private key is stored as base64 PKCS#8. The store backing the signing-key set is expected
+ * to be owner-only ({@code 0600}) — see {@link com.codeheadsystems.minitoken.store.DocumentStore}.
+ * <b>A real deployment would wrap the private key under a KMS</b> (the eventual recursive
+ * integration with mini-kms) rather than
  * holding it as a local base64 blob; that is intentionally out of scope here, and the field is
  * named to make the at-rest material obvious.
  *

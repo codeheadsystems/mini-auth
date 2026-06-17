@@ -1,4 +1,4 @@
-package com.codeheadsystems.miniidp.auth;
+package com.codeheadsystems.minitoken.auth;
 
 import java.util.ArrayList;
 import java.util.List;

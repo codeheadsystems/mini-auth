@@ -1,4 +1,4 @@
-package com.codeheadsystems.miniidp.auth;
+package com.codeheadsystems.minitoken.auth;
 
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
@@ -9,7 +9,7 @@ import java.util.Set;
  * {@link KeyOperation}s the client may perform against it.
  *
  * <p>This is the atom of mini-idp's authorization model and the shape that travels inside the
- * token's authorization claim (see {@code com.codeheadsystems.miniidp.token}). A verifier
+ * token's authorization claim (see {@code com.codeheadsystems.minitoken.token}). A verifier
  * (mini-kms) turns a verified token's grants into per-group authorization decisions: "may this
  * principal {@code DECRYPT} under group {@code billing}?" becomes a lookup over these records.
  *

@@ -1,4 +1,4 @@
-package com.codeheadsystems.miniidp.jwks;
+package com.codeheadsystems.minitoken.jwks;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;

@@ -1,5 +1,6 @@
 package com.codeheadsystems.miniidp.store;
 
+import com.codeheadsystems.minitoken.store.DocumentStore;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
@@ -15,9 +16,11 @@ import java.util.Set;
 /**
  * Reads and writes a single JSON document to a file, owner-only (0600) and atomically.
  *
- * <p>This is the storage primitive for every mini-idp persisted document (the client registry,
- * the signing-key set, the revocation denylist, and the audit log). It is a direct mirror of
- * mini-kms's {@code Keystore}: writes go to a temp file in the same directory, get their
+ * <p>This is mini-idp's file-backed implementation of mini-token's
+ * {@link com.codeheadsystems.minitoken.store.DocumentStore} SPI, and the storage primitive for
+ * every mini-idp persisted document — the client registry plus the token plane's signing-key set,
+ * revocation denylist, and audit log. It is a direct mirror of mini-kms's {@code Keystore}: writes
+ * go to a temp file in the same directory, get their
  * permissions restricted, and are then swapped into place with {@link StandardCopyOption#ATOMIC_MOVE}
  * so a crash mid-write can never leave a half-written or world-readable file.
  *
@@ -28,7 +31,7 @@ import java.util.Set;
  *
  * @param <T> the document type, a Jackson-serializable record.
  */
-public final class JsonStore<T> {
+public final class JsonStore<T> implements DocumentStore<T> {
 
   // INDENT_OUTPUT keeps the on-disk files human-readable (these are meant to be inspected).
   // Jackson 3: configure via the immutable builder (instance mutators were removed).

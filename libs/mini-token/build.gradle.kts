@@ -1,15 +1,17 @@
 /*
  * mini-token - the shared TOKEN PLANE library.
  *
- * The home for the JWS/JWKS/signing-key-lifecycle/rotation/revocation/audit machinery that
- * mini-idp already implements by hand and that mini-oidc needs too. The intent is to EXTRACT
- * that machinery here (out of mini-idp's `core/token`, `core/jwks`, `core/service`) so both
- * issuers share one audited implementation instead of two.
+ * The home for the JWS/JWKS/signing-key-lifecycle/rotation/revocation/audit machinery EXTRACTED
+ * from mini-idp (its `core/token`, `core/jwks`, `core/service`, `core/crypto`) so both issuers —
+ * mini-idp (machine client-credentials) and the future mini-oidc (human SSO) — share one
+ * implementation instead of two. It owns: the Ed25519 keys, the hand-rolled compact JWS/JWT, the
+ * JWKS model, the published `grants` claim contract, the signing-key lifecycle + rotation, the
+ * revocation denylist, the audit log, and a small persistence SPI (`store/DocumentStore`) the
+ * consuming service backs however it likes.
  *
- * Library only — no transport, no HTTP, no CLI (mirrors the siblings' I/O-free `core`).
- * This is a SCAFFOLD: it defines the seams (interfaces + value types) and is deliberately
- * free of real crypto. See the TODOs in the sources. Jackson is on the api classpath because
- * the eventual JWKS/claim DTOs will (de)serialize through it, exactly as in mini-idp.
+ * Library only — no transport, no HTTP, no CLI (mirrors the siblings' I/O-free `core`). Crypto is
+ * the JDK's Ed25519 only (no third-party crypto dependency). Jackson is on the api classpath
+ * because the JWKS/claim records (de)serialize through it, exactly as in mini-idp.
  */
 
 plugins {
@@ -17,7 +19,7 @@ plugins {
 }
 
 dependencies {
-    // The JWKS document and JWT claim records will be Jackson-bound, like mini-idp's.
+    // The JWKS document and JWT claim records are Jackson-bound, like mini-idp's.
     api(libs.jackson.databind)
     // JUnit 5 (jupiter + launcher) is supplied by the convention plugin.
 }

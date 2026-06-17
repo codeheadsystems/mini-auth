@@ -1,6 +1,6 @@
 package com.codeheadsystems.miniidp.model;
 
-import com.codeheadsystems.miniidp.auth.Authorization;
+import com.codeheadsystems.minitoken.auth.Authorization;
 import com.codeheadsystems.miniidp.secret.SecretHash;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 

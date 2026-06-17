@@ -1,8 +1,8 @@
-package com.codeheadsystems.miniidp.service;
+package com.codeheadsystems.minitoken.service;
 
-import com.codeheadsystems.miniidp.model.AuditEntry;
-import com.codeheadsystems.miniidp.store.JsonStore;
-import com.codeheadsystems.miniidp.store.StoreDocuments.Audit;
+import com.codeheadsystems.minitoken.model.AuditEntry;
+import com.codeheadsystems.minitoken.store.DocumentStore;
+import com.codeheadsystems.minitoken.store.TokenStoreDocuments.Audit;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,12 +12,12 @@ import java.util.List;
  * rotation, client registration/removal).
  *
  * <p>Entries carry no secret material (see {@link AuditEntry}). The log is held in memory and
- * rewritten on each append via {@link JsonStore}; for this educational service a bounded in-memory
+ * rewritten on each append via {@link DocumentStore}; for this educational service a bounded in-memory
  * list rewritten atomically is plenty. Methods are {@code synchronized}.
  */
 public final class AuditService {
 
-  private final JsonStore<Audit> store;
+  private final DocumentStore<Audit> store;
   private final Clock clock;
   private final List<AuditEntry> entries = new ArrayList<>();
 
@@ -25,7 +25,7 @@ public final class AuditService {
    * @param store the backing JSON store.
    * @param clock the clock used for entry timestamps.
    */
-  public AuditService(final JsonStore<Audit> store, final Clock clock) {
+  public AuditService(final DocumentStore<Audit> store, final Clock clock) {
     this.store = store;
     this.clock = clock;
     if (store.exists()) {

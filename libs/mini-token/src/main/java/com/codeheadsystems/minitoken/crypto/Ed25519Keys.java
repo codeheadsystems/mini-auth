@@ -1,4 +1,4 @@
-package com.codeheadsystems.miniidp.crypto;
+package com.codeheadsystems.minitoken.crypto;
 
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;

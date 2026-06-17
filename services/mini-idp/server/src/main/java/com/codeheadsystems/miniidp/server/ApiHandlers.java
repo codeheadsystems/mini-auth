@@ -1,6 +1,5 @@
 package com.codeheadsystems.miniidp.server;
 
-import com.codeheadsystems.miniidp.auth.Authorization;
 import com.codeheadsystems.miniidp.model.ClientRecord;
 import com.codeheadsystems.miniidp.server.dto.Dtos.ClientView;
 import com.codeheadsystems.miniidp.server.dto.Dtos.RegisterClientRequest;
@@ -11,13 +10,14 @@ import com.codeheadsystems.miniidp.server.http.HttpResponse;
 import com.codeheadsystems.miniidp.server.http.Json;
 import com.codeheadsystems.miniidp.server.http.RequestContext;
 import com.codeheadsystems.miniidp.server.http.Router;
-import com.codeheadsystems.miniidp.service.AuditService;
 import com.codeheadsystems.miniidp.service.ClientService;
-import com.codeheadsystems.miniidp.service.RevocationService;
-import com.codeheadsystems.miniidp.service.SigningKeyService;
-import com.codeheadsystems.miniidp.service.TokenIssuer;
-import com.codeheadsystems.miniidp.service.TokenIssuer.IssuedToken;
-import com.codeheadsystems.miniidp.token.GrantsClaim;
+import com.codeheadsystems.minitoken.auth.Authorization;
+import com.codeheadsystems.minitoken.service.AuditService;
+import com.codeheadsystems.minitoken.service.RevocationService;
+import com.codeheadsystems.minitoken.service.SigningKeyService;
+import com.codeheadsystems.minitoken.service.TokenIssuer;
+import com.codeheadsystems.minitoken.service.TokenIssuer.IssuedToken;
+import com.codeheadsystems.minitoken.token.GrantsClaim;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.ArrayList;
@@ -122,7 +122,7 @@ public final class ApiHandlers {
     // Single generic failure regardless of which check failed (no credential oracle).
     final ClientRecord client = authenticated.orElseThrow(ApiException::invalidClient);
 
-    final IssuedToken issued = tokenIssuer.issue(client);
+    final IssuedToken issued = tokenIssuer.issue(client.clientId(), client.authorization());
     audit.record("token.issued", client.clientId(), "jti=" + issued.jti());
 
     final Map<String, Object> body = new LinkedHashMap<>();

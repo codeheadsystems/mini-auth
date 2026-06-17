@@ -1,4 +1,4 @@
-package com.codeheadsystems.miniidp.token;
+package com.codeheadsystems.minitoken.token;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;

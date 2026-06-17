@@ -1,15 +1,14 @@
-package com.codeheadsystems.miniidp.service;
+package com.codeheadsystems.minitoken.service;
 
-import com.codeheadsystems.miniidp.auth.Authorization;
-import com.codeheadsystems.miniidp.auth.Grant;
-import com.codeheadsystems.miniidp.auth.KeyOperation;
-import com.codeheadsystems.miniidp.model.ClientRecord;
-import com.codeheadsystems.miniidp.service.SigningKeyService.Signer;
-import com.codeheadsystems.miniidp.token.GrantsClaim;
-import com.codeheadsystems.miniidp.token.Jws;
-import com.codeheadsystems.miniidp.token.JwsHeader;
-import com.codeheadsystems.miniidp.token.JwtClaims;
-import com.codeheadsystems.miniidp.util.RandomIds;
+import com.codeheadsystems.minitoken.auth.Authorization;
+import com.codeheadsystems.minitoken.auth.Grant;
+import com.codeheadsystems.minitoken.auth.KeyOperation;
+import com.codeheadsystems.minitoken.service.SigningKeyService.Signer;
+import com.codeheadsystems.minitoken.token.GrantsClaim;
+import com.codeheadsystems.minitoken.token.Jws;
+import com.codeheadsystems.minitoken.token.JwsHeader;
+import com.codeheadsystems.minitoken.token.JwtClaims;
+import com.codeheadsystems.minitoken.util.RandomIds;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -18,10 +17,13 @@ import java.util.StringJoiner;
 /**
  * Issues short-lived signed access tokens for the client-credentials grant.
  *
- * <p>Given an authenticated {@link ClientRecord}, it builds the {@link JwtClaims} (binding the
- * client's {@link Authorization} into the {@code grants} claim), stamps the standard time claims
- * from the {@link Clock}, mints a unique {@code jti}, and signs with the current
- * {@link SigningKeyService} key — the JWS header carries that key's {@code kid} for rotation.
+ * <p>Given an authenticated principal — a {@code subject} (the token {@code sub}) and its
+ * {@link Authorization} — it builds the {@link JwtClaims} (binding the authorization into the
+ * {@code grants} claim), stamps the standard time claims from the {@link Clock}, mints a unique
+ * {@code jti}, and signs with the current {@link SigningKeyService} key — the JWS header carries
+ * that key's {@code kid} for rotation. It is deliberately framework-neutral: the caller owns the
+ * client/identity model and passes only the subject and the grants, so the same issuer serves any
+ * front door (mini-idp's machine clients, mini-oidc's human SSO).
  *
  * <p>The {@code cnf} (channel-binding) claim is intentionally left null: it is a reserved
  * placeholder for future mTLS-thumbprint / peer-uid binding and is neither populated nor enforced
@@ -55,20 +57,20 @@ public final class TokenIssuer {
   }
 
   /**
-   * Issue a token for an authenticated client.
+   * Issue a token for an authenticated principal.
    *
-   * @param client the authenticated client.
+   * @param subject       the token subject ({@code sub}) — e.g. the authenticated client id.
+   * @param authorization the grants/control-plane authority the token carries; never null.
    * @return the serialized token plus the metadata the {@code /oauth/token} response needs.
    */
-  public IssuedToken issue(final ClientRecord client) {
+  public IssuedToken issue(final String subject, final Authorization authorization) {
     final Instant now = clock.instant();
     final Instant expiry = now.plus(tokenTtl);
     final String jti = ids.newJti();
-    final Authorization authorization = client.authorization();
 
     final JwtClaims claims = new JwtClaims(
         issuer,
-        client.clientId(),
+        subject,
         audience,
         now.getEpochSecond(),
         now.getEpochSecond(),

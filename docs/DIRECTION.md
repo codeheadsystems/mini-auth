@@ -60,7 +60,7 @@ Every mini, its one-line purpose, whether it is a library or a service, and its 
 | --- | --- | --- | --- |
 | **mini-kms** | Envelope encryption / KMS: rotatable keys, the eventual vault that wraps other services' signing keys. | service (+ core/client libs) | **shipping** |
 | **mini-idp** | Machine-to-machine identity: OAuth2 client-credentials → Ed25519 JWT, JWKS. | service (+ core lib) | **shipping** |
-| **mini-token** | The shared token plane: JWS, JWKS, signing-key lifecycle, rotation, revocation, audit. An extraction of machinery mini-idp already has. | library | **scaffolded** |
+| **mini-token** | The shared token plane: JWS, JWKS, signing-key lifecycle, rotation, revocation, audit, the `grants` claim contract, and a small persistence SPI. Extracted from mini-idp; mini-idp now consumes it. | library | **shipping** |
 | **mini-policy** | Generalized authorization decision function: `(principal, resource, action) → allow/deny`. Generalizes mini-kms's `KeyAuthorizationPolicy`. | library | **scaffolded** |
 | **mini-oidc** | Human SSO / OpenID Provider: authorization-code + PKCE, ID + access tokens, browser SSO sessions, login/consent UI. Uses **pk-auth** for the passkey credential layer. | service | **scaffolded** |
 | **mini-gateway** | Forward-auth endpoint for a reverse proxy (Traefik / Caddy / nginx `auth_request`) to gate apps with no native auth. | service | **scaffolded** |
@@ -231,12 +231,17 @@ wrapper, one version catalog, one set of `build-logic` convention plugins, and o
 Every new service and library is scaffolded to compile + pass a trivial test; this direction doc
 exists.
 
-**Phase 1 — Extract the token plane (and the shared foundation).** Lift mini-idp's
-JWS/JWKS/rotation/revocation/audit into **mini-token**; re-point mini-idp at it with no contract
-change. This is the lowest-risk extraction because mini-idp already has the reference implementation
-and tests. The same step is the right moment to extract the
-[`mini-common` candidates](#toward-a-mini-common-library) (Argon2 settings, the atomic-`0600` JSON
-store, base64url, constant-time compare) once there is a clear second consumer to pin them against.
+**Phase 1 — Extract the token plane (and the shared foundation).** *Token plane: done.* mini-idp's
+JWS/JWKS/rotation/revocation/audit — plus the Ed25519 keys, the `grants` claim contract, the auth
+model the claim maps onto (`Authorization`/`Grant`/`KeyOperation`), `Base64Url`, and `RandomIds` —
+were lifted into **mini-token**, and mini-idp re-points at it with no contract change (the HTTP
+endpoints, token claims, JWKS output, on-disk JSON shapes, and the single-`invalid_client`
+no-oracle behavior are byte-for-byte identical, pinned by mini-idp's existing tests). Persistence is
+now a small `store/DocumentStore` SPI in mini-token; mini-idp's atomic-`0600` `JsonStore` implements
+it. The remaining [`mini-common` candidates](#toward-a-mini-common-library) (Argon2 settings, the
+JSON store itself, constant-time compare) are deliberately **left in mini-idp** for now — the token
+extraction only promoted `Base64Url`/`RandomIds`, which it directly needed; the rest waits for a
+clear second consumer to pin them against.
 
 **Phase 2 — Generalize authorization.** Flesh out **mini-policy** into a real engine and adopt it
 behind mini-kms's `KeyAuthorizationPolicy` seam first (it already has the right shape), then behind

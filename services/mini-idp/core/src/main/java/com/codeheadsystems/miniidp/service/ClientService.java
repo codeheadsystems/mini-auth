@@ -1,12 +1,12 @@
 package com.codeheadsystems.miniidp.service;
 
-import com.codeheadsystems.miniidp.auth.Authorization;
+import com.codeheadsystems.minitoken.auth.Authorization;
 import com.codeheadsystems.miniidp.model.ClientRecord;
 import com.codeheadsystems.miniidp.secret.Argon2SecretHasher;
 import com.codeheadsystems.miniidp.secret.SecretHash;
 import com.codeheadsystems.miniidp.store.JsonStore;
 import com.codeheadsystems.miniidp.store.StoreDocuments.ClientRegistry;
-import com.codeheadsystems.miniidp.util.RandomIds;
+import com.codeheadsystems.minitoken.util.RandomIds;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

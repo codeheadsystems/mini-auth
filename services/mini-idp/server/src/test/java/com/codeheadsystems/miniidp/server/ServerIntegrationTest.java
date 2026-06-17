@@ -5,9 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.codeheadsystems.miniidp.jwks.JwkSet;
-import com.codeheadsystems.miniidp.service.TokenVerifier;
-import com.codeheadsystems.miniidp.service.TokenVerifier.Result;
+import com.codeheadsystems.minitoken.jwks.JwkSet;
+import com.codeheadsystems.minitoken.service.TokenVerifier;
+import com.codeheadsystems.minitoken.service.TokenVerifier.Result;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;

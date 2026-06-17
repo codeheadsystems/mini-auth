@@ -1,12 +1,12 @@
-package com.codeheadsystems.miniidp.service;
+package com.codeheadsystems.minitoken.service;
 
-import com.codeheadsystems.miniidp.crypto.Ed25519Keys;
-import com.codeheadsystems.miniidp.jwks.Jwk;
-import com.codeheadsystems.miniidp.jwks.JwkSet;
-import com.codeheadsystems.miniidp.model.SigningKeyRecord;
-import com.codeheadsystems.miniidp.store.JsonStore;
-import com.codeheadsystems.miniidp.store.StoreDocuments.SigningKeys;
-import com.codeheadsystems.miniidp.util.RandomIds;
+import com.codeheadsystems.minitoken.crypto.Ed25519Keys;
+import com.codeheadsystems.minitoken.jwks.Jwk;
+import com.codeheadsystems.minitoken.jwks.JwkSet;
+import com.codeheadsystems.minitoken.model.SigningKeyRecord;
+import com.codeheadsystems.minitoken.store.DocumentStore;
+import com.codeheadsystems.minitoken.store.TokenStoreDocuments.SigningKeys;
+import com.codeheadsystems.minitoken.util.RandomIds;
 import java.security.KeyPair;
 import java.security.PrivateKey;
 import java.time.Clock;
@@ -24,12 +24,13 @@ import java.util.List;
  * it has been retired longer than {@code retiredKeyRetention} — which must exceed the maximum
  * token TTL, so no live token is ever left with an unpublished {@code kid}.
  *
- * <p>State is persisted via {@link JsonStore} (0600, holds private keys). All methods are
+ * <p>State is persisted via the {@link DocumentStore} SPI; the document holds private keys, so a
+ * file-backed implementation should restrict it to owner-only ({@code 0600}). All methods are
  * {@code synchronized}; rotation is rare and signing is cheap, so a single lock is adequate.
  */
 public final class SigningKeyService {
 
-  private final JsonStore<SigningKeys> store;
+  private final DocumentStore<SigningKeys> store;
   private final RandomIds ids;
   private final Clock clock;
   private final Duration retiredKeyRetention;
@@ -42,7 +43,7 @@ public final class SigningKeyService {
    * @param clock               the clock for created/retired timestamps and pruning.
    * @param retiredKeyRetention how long a retired key stays published; must exceed the token TTL.
    */
-  public SigningKeyService(final JsonStore<SigningKeys> store, final RandomIds ids,
+  public SigningKeyService(final DocumentStore<SigningKeys> store, final RandomIds ids,
                            final Clock clock, final Duration retiredKeyRetention) {
     this.store = store;
     this.ids = ids;

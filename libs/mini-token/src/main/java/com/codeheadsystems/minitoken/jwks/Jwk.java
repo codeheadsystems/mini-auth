@@ -1,7 +1,7 @@
-package com.codeheadsystems.miniidp.jwks;
+package com.codeheadsystems.minitoken.jwks;
 
-import com.codeheadsystems.miniidp.crypto.Ed25519Keys;
-import com.codeheadsystems.miniidp.token.Base64Url;
+import com.codeheadsystems.minitoken.crypto.Ed25519Keys;
+import com.codeheadsystems.minitoken.token.Base64Url;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;

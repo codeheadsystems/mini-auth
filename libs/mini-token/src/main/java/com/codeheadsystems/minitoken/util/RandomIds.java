@@ -1,6 +1,6 @@
-package com.codeheadsystems.miniidp.util;
+package com.codeheadsystems.minitoken.util;
 
-import com.codeheadsystems.miniidp.token.Base64Url;
+import com.codeheadsystems.minitoken.token.Base64Url;
 import java.security.SecureRandom;
 
 /**

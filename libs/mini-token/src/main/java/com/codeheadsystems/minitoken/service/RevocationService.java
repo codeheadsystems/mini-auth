@@ -1,8 +1,8 @@
-package com.codeheadsystems.miniidp.service;
+package com.codeheadsystems.minitoken.service;
 
-import com.codeheadsystems.miniidp.model.Revocation;
-import com.codeheadsystems.miniidp.store.JsonStore;
-import com.codeheadsystems.miniidp.store.StoreDocuments.Revocations;
+import com.codeheadsystems.minitoken.model.Revocation;
+import com.codeheadsystems.minitoken.store.DocumentStore;
+import com.codeheadsystems.minitoken.store.TokenStoreDocuments.Revocations;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -18,11 +18,11 @@ import java.util.Map;
  * whose {@code jti} appears. Entries are pruned once the revoked token's own {@code exp} has
  * passed, since after that the token fails on expiry grounds regardless.
  *
- * <p>Persisted via {@link JsonStore}; methods are {@code synchronized}.
+ * <p>Persisted via {@link DocumentStore}; methods are {@code synchronized}.
  */
 public final class RevocationService {
 
-  private final JsonStore<Revocations> store;
+  private final DocumentStore<Revocations> store;
   private final Clock clock;
   private final Map<String, Revocation> byJti = new LinkedHashMap<>();
 
@@ -30,7 +30,7 @@ public final class RevocationService {
    * @param store the backing JSON store.
    * @param clock the clock used for revocation timestamps and pruning.
    */
-  public RevocationService(final JsonStore<Revocations> store, final Clock clock) {
+  public RevocationService(final DocumentStore<Revocations> store, final Clock clock) {
     this.store = store;
     this.clock = clock;
     if (store.exists()) {

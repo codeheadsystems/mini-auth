@@ -1,4 +1,4 @@
-package com.codeheadsystems.miniidp.token;
+package com.codeheadsystems.minitoken.token;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;

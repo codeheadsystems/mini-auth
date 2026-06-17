@@ -1,4 +1,4 @@
-package com.codeheadsystems.miniidp.auth;
+package com.codeheadsystems.minitoken.auth;
 
 /**
  * The data-plane operations a client may be granted against a key group.

@@ -104,7 +104,7 @@ mini-auth/
 │   ├── mini-ca/                             (roadmap placeholder)
 │   └── mini-console/                        (roadmap placeholder)
 └── libs/                        # shared libraries (no transport)
-    ├── mini-token/                          (scaffold)
+    ├── mini-token/                          (shipping; the token plane extracted from mini-idp)
     └── mini-policy/                         (scaffold)
 ```
 
@@ -117,7 +117,7 @@ mini-auth/
 | mini-directory | `:services:mini-directory` | service (application) | scaffold |
 | mini-ca | `:services:mini-ca` | service (future) | roadmap placeholder (no logic) |
 | mini-console | `:services:mini-console` | service (future) | roadmap placeholder (no logic) |
-| mini-token | `:libs:mini-token` | library | scaffold |
+| mini-token | `:libs:mini-token` | library | **shipping** (token plane extracted from mini-idp) |
 | mini-policy | `:libs:mini-policy` | library | scaffold |
 
 - **Convention plugins, not `subprojects {}`.** The shared Java conventions (JDK 21 toolchain,
@@ -245,28 +245,37 @@ services/mini-idp/server/build/install/server/bin/server --port 8455 --data-dir 
 **Architecture.** Two modules under base package `com.codeheadsystems.miniidp` (paths
 `:services:mini-idp:core/server`):
 
-- **`core`** — identity model, crypto, token machinery, **no HTTP/transport code**. Owns the
-  authorization model, Argon2id secret hashing, Ed25519 keys, the hand-rolled JWS/JWT, the JWKS
-  model, the JSON file stores, and the services on them.
+- **`core`** — the IDP-specific identity layer, **no HTTP/transport code**. Owns the client
+  registry model (`model/ClientRecord`) and `service/ClientService`, Argon2id client-secret hashing
+  (`secret/*`), and the atomic-`0600` `store/JsonStore` (which implements mini-token's
+  `DocumentStore` SPI). The **token plane it used to own was extracted to `:libs:mini-token`** (see
+  below) and is consumed as an `api` dependency.
 - **`server`** — the HTTP daemon (`ServerMain`, JDK `com.sun.net.httpserver.HttpServer` on
   loopback), router, handlers, config, and the OpenAPI spec + vendored Swagger UI. Depends on `core`.
 
+- **The token plane lives in `mini-token`.** The Ed25519 keys, the hand-rolled JWS/JWT, the JWKS
+  model, the `grants` claim, the auth model the claim maps onto, and the signing-key /
+  revocation / audit services are all in `:libs:mini-token` (`com.codeheadsystems.minitoken.*`) —
+  see the mini-token notes in the umbrella section above. mini-idp wires them together in
+  `server/IdpServer` and exposes them over HTTP; the issuer takes a `(subject, Authorization)`, so
+  `core` keeps its `ClientRecord` to itself.
 - **The token contract.** `server/src/main/resources/openapi.yaml` (served at `/openapi.yaml`,
-  `/openapi.json`, `/docs`) is authoritative. The `grants` claim (from `token/GrantsClaim` over
-  `auth/Authorization`) maps to mini-kms: `sub → Principal.id`, `grants.control → Principal.admin`,
-  `grants.groups[] → KeyAuthorizationPolicy`. `auth/KeyOperation` is a **deliberate mirror** of
-  mini-kms's enum — the string values are the contract, do not rename them. A `cnf` claim is
-  reserved (RFC 7800) but not enforced yet.
-- **Crypto & formats (hand-rolled bits).** Ed25519 via the JDK only (`crypto/Ed25519Keys`). The
-  JWS is hand-rolled in `token/Jws` (not a JOSE lib): `base64url(header).base64url(payload).
-  base64url(sig)`; `token/TokenVerifier` is the reference offline verifier (signature first, then
-  `iss`/`aud`/time/revocation). Client secrets hashed with Argon2id (`secret/Argon2SecretHasher`),
-  verified in constant time.
-- **Persistence & rotation.** All state is JSON via `store/JsonStore` (atomic temp-file +
-  `ATOMIC_MOVE` + `0600`). Private signing keys in `signing-keys.json` (`0600`); the marker in
-  `model/SigningKeyRecord` notes a real deployment would wrap them under a KMS (the eventual
-  mini-kms integration). Rotation (`service/SigningKeyService`) keeps retired keys in the JWKS
-  (`retiredKeyRetention`, = 2× token TTL) so in-flight tokens still verify.
+  `/openapi.json`, `/docs`) is authoritative. The `grants` claim (mini-token's
+  `token/GrantsClaim` over `auth/Authorization`) maps to mini-kms: `sub → Principal.id`,
+  `grants.control → Principal.admin`, `grants.groups[] → KeyAuthorizationPolicy`. `auth/KeyOperation`
+  is a **deliberate mirror** of mini-kms's enum — the string values are the contract, do not rename
+  them. A `cnf` claim is reserved (RFC 7800) but not enforced yet.
+- **Crypto & formats (hand-rolled bits, now in mini-token).** Ed25519 via the JDK only
+  (`crypto/Ed25519Keys`). The JWS is hand-rolled in `token/Jws` (not a JOSE lib):
+  `base64url(header).base64url(payload).base64url(sig)`; `service/TokenVerifier` is the reference
+  offline verifier (signature first, then `iss`/`aud`/time/revocation). Client secrets — which stay
+  in mini-idp — are hashed with Argon2id (`secret/Argon2SecretHasher`), verified in constant time.
+- **Persistence & rotation.** All state is JSON via mini-idp's `store/JsonStore` (atomic temp-file +
+  `ATOMIC_MOVE` + `0600`), passed to the token services through the `DocumentStore` SPI. Private
+  signing keys in `signing-keys.json` (`0600`); the marker in mini-token's `model/SigningKeyRecord`
+  notes a real deployment would wrap them under a KMS (the eventual mini-kms integration). Rotation
+  (mini-token's `service/SigningKeyService`) keeps retired keys in the JWKS (`retiredKeyRetention`,
+  = 2× token TTL) so in-flight tokens still verify.
 - **Conventions.** `core` stays HTTP-free (composition root is `server/IdpServer`). The token
   endpoint returns one generic `invalid_client` for any auth failure. Admin token via
   `resolveAdminToken`. **The OpenAPI spec is the contract** — `OpenApiContractTest` fails if a

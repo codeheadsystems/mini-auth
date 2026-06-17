@@ -1,7 +1,7 @@
 package com.codeheadsystems.miniidp.server.dto;
 
 import com.codeheadsystems.miniidp.model.ClientRecord;
-import com.codeheadsystems.miniidp.token.GrantsClaim;
+import com.codeheadsystems.minitoken.token.GrantsClaim;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 

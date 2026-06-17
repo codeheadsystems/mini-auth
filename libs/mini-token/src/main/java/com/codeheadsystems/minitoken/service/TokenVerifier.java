@@ -1,10 +1,10 @@
-package com.codeheadsystems.miniidp.service;
+package com.codeheadsystems.minitoken.service;
 
-import com.codeheadsystems.miniidp.jwks.Jwk;
-import com.codeheadsystems.miniidp.jwks.JwkSet;
-import com.codeheadsystems.miniidp.token.Jws;
-import com.codeheadsystems.miniidp.token.JwsHeader;
-import com.codeheadsystems.miniidp.token.JwtClaims;
+import com.codeheadsystems.minitoken.jwks.Jwk;
+import com.codeheadsystems.minitoken.jwks.JwkSet;
+import com.codeheadsystems.minitoken.token.Jws;
+import com.codeheadsystems.minitoken.token.JwsHeader;
+import com.codeheadsystems.minitoken.token.JwtClaims;
 import java.security.PublicKey;
 import java.time.Clock;
 import java.util.function.Predicate;

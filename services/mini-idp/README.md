@@ -178,22 +178,27 @@ argument**, and is never logged.
 
 ## Architecture
 
-Two Gradle modules under `com.codeheadsystems.miniidp`:
+The token plane — Ed25519 keys, the hand-rolled JWS/JWT, JWKS, the `grants` claim contract and the
+auth model it maps onto, and the signing-key / revocation / audit services — lives in the shared
+**[`mini-token`](../../libs/mini-token)** library (`com.codeheadsystems.minitoken`). mini-idp depends
+on it and is two Gradle modules under `com.codeheadsystems.miniidp`:
 
-- **`core`** — identity model, crypto, and token machinery, with **no HTTP code** (kept reusable
-  and unit-testable in isolation):
-  - `auth/` — `KeyOperation` (mirrors mini-kms), `Grant`, `Authorization` (the payload).
-  - `secret/` — `Argon2SecretHasher` + `SecretHash` (Argon2id, constant-time verify).
-  - `crypto/` — `Ed25519Keys` (JDK-only key gen / encoding).
-  - `token/` — `Base64Url`, `JwsHeader`, `Jws` (hand-rolled compact JWS), `JwtClaims`,
-    `GrantsClaim`.
-  - `jwks/` — `Jwk`, `JwkSet`.
-  - `store/` — `JsonStore` (atomic + 0600) and the document records.
-  - `service/` — `ClientService`, `SigningKeyService` (rotation), `RevocationService`,
-    `AuditService`, `TokenIssuer`, `TokenVerifier` (reference offline verifier).
-- **`server`** — `ServerMain`/`IdpServer` (composition root), `ServerConfig`, a tiny `http/`
-  router over the JDK `HttpServer`, `ApiHandlers`, `AdminAuthenticator`, and the OpenAPI/Swagger
-  serving. Each request runs on a virtual thread.
+- **`core`** — the IDP-specific identity layer, with **no HTTP code** (kept reusable and
+  unit-testable in isolation):
+  - `secret/` — `Argon2SecretHasher` + `SecretHash` (Argon2id client-secret hash, constant-time verify).
+  - `model/` — `ClientRecord` (the registered-client record; its grants are a mini-token `Authorization`).
+  - `store/` — `JsonStore` (atomic + 0600), which **implements mini-token's `DocumentStore` SPI**,
+    plus `StoreDocuments.ClientRegistry`.
+  - `service/` — `ClientService` (registration, listing, grant updates, constant-time credential
+    verification).
+- **`server`** — `ServerMain`/`IdpServer` (composition root — wires mini-token's services over the
+  `JsonStore`s), `ServerConfig`, a tiny `http/` router over the JDK `HttpServer`, `ApiHandlers`,
+  `AdminAuthenticator`, and the OpenAPI/Swagger serving. Each request runs on a virtual thread.
+
+The token-plane pieces mini-idp used to hold directly — `crypto/Ed25519Keys`, `token/{Base64Url,
+JwsHeader,Jws,JwtClaims,GrantsClaim}`, `jwks/{Jwk,JwkSet}`, `auth/{KeyOperation,Grant,Authorization}`,
+`util/RandomIds`, and the `SigningKeyService`/`TokenIssuer`/`TokenVerifier`/`RevocationService`/
+`AuditService` services — now live under `com.codeheadsystems.minitoken.*` in mini-token.
 
 ```
 passphrase-less:  client secret --Argon2id--> stored hash       (registry, 0600)

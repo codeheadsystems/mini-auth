@@ -1,8 +1,8 @@
-package com.codeheadsystems.miniidp.token;
+package com.codeheadsystems.minitoken.token;
 
-import com.codeheadsystems.miniidp.auth.Authorization;
-import com.codeheadsystems.miniidp.auth.Grant;
-import com.codeheadsystems.miniidp.auth.KeyOperation;
+import com.codeheadsystems.minitoken.auth.Authorization;
+import com.codeheadsystems.minitoken.auth.Grant;
+import com.codeheadsystems.minitoken.auth.KeyOperation;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
