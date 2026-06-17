@@ -1,0 +1,18 @@
+# Example Caddy config: gate a no-auth upstream (whoami) behind a mini-oidc passkey login.
+#
+# mini-oidc and the app share one hostname so the host-only `mioidc_session` cookie (Path=/) reaches
+# both. mini-oidc and mini-gateway share the sessions.json volume, so the gateway validates the very
+# session mini-oidc creates at login.
+
+example.localhost {
+    # The OP's own endpoints go straight to mini-oidc (never gated).
+    @oidc path /authorize* /token /login* /jwks.json /.well-known/* /userinfo /logout /register/*
+    reverse_proxy @oidc mini-oidc:8477
+
+    # Everything else: ask mini-gateway, then proxy to the no-auth app on allow.
+    forward_auth mini-gateway:8488 {
+        uri /verify
+        copy_headers X-Auth-Subject X-Auth-Scope X-Auth-Source
+    }
+    reverse_proxy whoami:80
+}

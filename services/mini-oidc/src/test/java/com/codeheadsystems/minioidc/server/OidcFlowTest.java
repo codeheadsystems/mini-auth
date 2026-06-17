@@ -7,8 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.codeheadsystems.minioidc.auth.PasskeyStack;
 import com.codeheadsystems.minioidc.directory.DirectoryUser;
 import com.codeheadsystems.minioidc.directory.InMemoryUserDirectory;
-import com.codeheadsystems.minioidc.service.OidcTokenVerifier;
 import com.codeheadsystems.minioidc.service.ScopeAuthorizer;
+import com.codeheadsystems.minitoken.token.JwsClaimsVerifier;
 import com.codeheadsystems.minioidc.support.MutableClock;
 import com.codeheadsystems.minipolicy.Action;
 import com.codeheadsystems.minipolicy.Grant;
@@ -280,7 +280,7 @@ class OidcFlowTest {
 
   private Optional<JsonNode> verify(final String token, final String audience) throws Exception {
     final JwkSet jwks = MAPPER.readValue(get("/jwks.json", null).body(), JwkSet.class);
-    return OidcTokenVerifier.verify(token, jwks, ISSUER, audience, clock, 5);
+    return JwsClaimsVerifier.verify(token, jwks, ISSUER, audience, clock, 5);
   }
 
   private String registerPublicClient() throws Exception {

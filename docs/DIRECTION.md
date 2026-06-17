@@ -60,10 +60,10 @@ Every mini, its one-line purpose, whether it is a library or a service, and its 
 | --- | --- | --- | --- |
 | **mini-kms** | Envelope encryption / KMS: rotatable keys, the eventual vault that wraps other services' signing keys. | service (+ core/client libs) | **shipping** |
 | **mini-idp** | Machine-to-machine identity: OAuth2 client-credentials → Ed25519 JWT, JWKS. | service (+ core lib) | **shipping** |
-| **mini-token** | The shared token plane: JWS, JWKS, signing-key lifecycle, rotation, revocation, audit, the `grants` claim contract, and a small persistence SPI. Extracted from mini-idp; mini-idp now consumes it. | library | **shipping** |
+| **mini-token** | The shared token plane: JWS, JWKS, signing-key lifecycle, rotation, revocation, audit, the `grants` claim contract, a persistence SPI, the offline `JwsClaimsVerifier`, AND the shared browser-SSO `SessionService` (so mini-oidc and mini-gateway share one session store). | library | **shipping** |
 | **mini-policy** | Generalized authorization decision function: `(principal, resource, action) → allow/deny`. Generalizes mini-kms's `KeyAuthorizationPolicy`. | library | **scaffolded** |
 | **mini-oidc** | Human SSO / OpenID Provider: authorization-code + PKCE, ID + access + refresh tokens, /userinfo, browser SSO sessions, single logout, login/consent UI. Embeds **pk-auth** (passkeys + backup-code recovery), mints via **mini-token**, authorizes scopes via **mini-policy**, resolves users from **mini-directory**. | service | **shipping** |
-| **mini-gateway** | Forward-auth endpoint for a reverse proxy (Traefik / Caddy / nginx `auth_request`) to gate apps with no native auth. | service | **scaffolded** |
+| **mini-gateway** | Forward-auth endpoint for a reverse proxy (Traefik / Caddy / nginx `auth_request`) to gate apps with no native auth: validates the shared mini-oidc SSO session or a bearer token, decides per-route via mini-policy, returns allow / 401 / 403 / redirect-to-login. | service | **shipping** |
 | **mini-directory** | The single identity source of truth: humans, groups, roles, service accounts, and their grant mappings; resolves any account to a mini-policy `Principal` + expanded grants. | service | **shipping** (standalone; issuers not yet wired to read from it) |
 | **pk-auth** | Passkeys-first auth library set, published on Maven Central under `com.codeheadsystems`. Consumed as a normal dependency — **not vendored**. | external library | **shipping (external)** |
 | **mini-ca** | Small internal certificate authority for mTLS between the minis and workload identity in the homelab. | service (future) | **roadmap** (placeholder module) |
@@ -266,9 +266,14 @@ mini-directory over HTTP. What remains optional/hardening: gating passkey enrolm
 pk-auth credential store (swap the in-memory SPIs for pk-auth's JDBI/DynamoDB), and wiring the
 magic-link / OTP recovery flows (the same `RecoveryAuthenticator` seam backup codes use).
 
-**Phase 5 — Gate everything.** Build **mini-gateway**: a forward-auth endpoint for the reverse
-proxy, verifying tokens via mini-token and deciding via mini-policy, redirecting browsers to
-mini-oidc.
+**Phase 5 — Gate everything.** *Done.* **mini-gateway** ships: a forward-auth endpoint
+(Traefik ForwardAuth / Caddy forward_auth / nginx auth_request) that validates the **shared**
+mini-oidc SSO session (the session mechanism was lifted into mini-token so both read one store) or a
+bearer token (verified offline via mini-token against the OP's JWKS), decides per-route through
+mini-policy from config-driven rules, and answers allow (+ identity headers) / 401 / 403 /
+redirect-to-mini-oidc. The README ships runnable Traefik + Caddy snippets that gate a no-auth
+upstream behind a mini-oidc passkey login. Remaining hardening: a `Domain`-scoped session cookie for
+subdomain SSO (today the cookie is host-only, so the OP and gated apps share one hostname).
 
 **Phase 6 — Close the recursive loop.** Wrap mini-token's signing keys under **mini-kms** so no
 private signing key sits in plaintext on disk anywhere in the family.

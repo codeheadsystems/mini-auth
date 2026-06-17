@@ -1,0 +1,54 @@
+# Example Traefik (v3) stack: gate a no-auth upstream (whoami) behind a mini-oidc passkey login,
+# using mini-gateway as a ForwardAuth middleware.
+#
+# Session sharing: mini-oidc and mini-gateway mount the same `sso` volume, so the gateway reads the
+# very sessions.json mini-oidc writes. Same hostname (example.localhost) means the host-only
+# `mioidc_session` cookie covers both the OP routes and the app.
+#
+# Build the two images first (./gradlew :services:mini-oidc:installDist / :services:mini-gateway:installDist
+# and wrap each `build/install/...` in a JDK 21 base image), then `docker compose up`.
+
+services:
+  traefik:
+    image: traefik:v3
+    command:
+      - --providers.docker=true
+      - --entrypoints.web.address=:80
+    ports: ["80:80"]
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+
+  mini-oidc:
+    image: mini-oidc
+    command: >
+      --port 8477 --issuer http://example.localhost --rp-id example.localhost
+      --rp-origin http://example.localhost --data-dir /data
+    environment:
+      MINIOIDC_ADMIN_TOKEN: dev-admin
+    volumes: ["sso:/data"]
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.oidc.rule=Host(`example.localhost`) && PathPrefix(`/authorize`,`/token`,`/login`,`/jwks.json`,`/.well-known`,`/userinfo`,`/logout`,`/register`,`/admin`)"
+      - traefik.http.services.oidc.loadbalancer.server.port=8477
+
+  mini-gateway:
+    image: mini-gateway
+    command: >
+      --port 8488 --sessions-file /data/sessions.json --routes-file /etc/routes.json
+      --login-url "http://example.localhost/authorize?response_type=code&client_id=gateway&redirect_uri=http://example.localhost/&scope=openid&code_challenge=PLACEHOLDER&code_challenge_method=plain"
+      --jwks-url http://mini-oidc:8477/jwks.json --issuer http://example.localhost --audience http://example.localhost/userinfo
+    volumes:
+      - "sso:/data"
+      - "./routes.json:/etc/routes.json:ro"
+
+  whoami:
+    image: traefik/whoami
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.app.rule=Host(`example.localhost`)"
+      - traefik.http.routers.app.priority=1
+      - traefik.http.routers.app.middlewares=forward-auth@docker
+      - traefik.http.middlewares.forward-auth.forwardauth.address=http://mini-gateway:8488/verify
+      - traefik.http.middlewares.forward-auth.forwardauth.authResponseHeaders=X-Auth-Subject,X-Auth-Scope,X-Auth-Source
+
+volumes:
+  sso: {}

@@ -2,8 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this
 repository. It is the **single** guide for the whole `mini-` family: the umbrella conventions
-first, then a folded-in section per shipping service (mini-kms, mini-idp, mini-directory, mini-oidc).
-There are no per-module `CLAUDE.md` files — this is it.
+first, then a folded-in section per shipping service (mini-kms, mini-idp, mini-directory, mini-oidc,
+mini-gateway). There are no per-module `CLAUDE.md` files — this is it.
 
 > **Read first.** `docs/DIRECTION.md` is the canonical map of the family — the vision, the
 > component catalog, the architecture, the runtime relationships, the roadmap, and the
@@ -99,12 +99,12 @@ mini-auth/
 │   ├── mini-kms/   {core, server, client}   (shipping)
 │   ├── mini-idp/   {core, server}           (shipping)
 │   ├── mini-oidc/                           (shipping; human SSO / OpenID Provider, embeds pk-auth)
-│   ├── mini-gateway/                        (scaffold)
+│   ├── mini-gateway/                        (shipping; forward-auth for a reverse proxy)
 │   ├── mini-directory/                      (shipping; identity source of truth, standalone)
 │   ├── mini-ca/                             (roadmap placeholder)
 │   └── mini-console/                        (roadmap placeholder)
 └── libs/                        # shared libraries (no transport)
-    ├── mini-token/                          (shipping; the token plane extracted from mini-idp)
+    ├── mini-token/                          (shipping; token plane + shared SSO session store)
     └── mini-policy/                         (scaffold)
 ```
 
@@ -113,7 +113,7 @@ mini-auth/
 | mini-kms | `:services:mini-kms:core/server/client` | service | **shipping** (§ below) |
 | mini-idp | `:services:mini-idp:core/server` | service | **shipping** (§ below) |
 | mini-oidc | `:services:mini-oidc` | service (application) | **shipping** (§ below) — embeds pk-auth |
-| mini-gateway | `:services:mini-gateway` | service (application) | scaffold |
+| mini-gateway | `:services:mini-gateway` | service (application) | **shipping** (§ below) |
 | mini-directory | `:services:mini-directory` | service (application) | **shipping** (§ below) |
 | mini-ca | `:services:mini-ca` | service (future) | roadmap placeholder (no logic) |
 | mini-console | `:services:mini-console` | service (future) | roadmap placeholder (no logic) |
@@ -396,3 +396,50 @@ services/mini-oidc/build/install/mini-oidc/bin/mini-oidc \
   directory is used (nobody resolves). Passkey enrolment (`/register/passkey/**`) is currently
   unauthenticated self-enrolment — a real deployment gates it.
 - **Docs.** `services/mini-oidc/README.md` — the flow, the endpoint list, and the security model.
+
+---
+
+# Service: mini-gateway (`services/mini-gateway`)
+
+mini-gateway is the **forward-auth endpoint** a reverse proxy (Traefik ForwardAuth, Caddy
+forward_auth, nginx auth_request) calls before forwarding a request, to gate upstreams that have no
+auth of their own. **Shipping**, and pure composition: it reuses mini-token (session store + JWS
+verification) and mini-policy (the decision), inventing nothing.
+
+**Run it.** No secrets of its own; it validates the family's sessions/tokens.
+
+```bash
+./gradlew :services:mini-gateway:installDist
+services/mini-gateway/build/install/mini-gateway/bin/mini-gateway \
+  --port 8488 --sessions-file ~/.mini-oidc/sessions.json --routes-file ./routes.json \
+  --login-url "https://example.com/authorize?response_type=code&client_id=gateway&redirect_uri=https://example.com/&scope=openid&code_challenge=…&code_challenge_method=S256" \
+  --jwks-url https://example.com/jwks.json --issuer https://example.com --audience https://example.com/userinfo
+```
+
+**Architecture.** One application module under base package `com.codeheadsystems.minigateway`:
+
+- **`server/GatewayHandlers`** — the `GET /verify` endpoint (registered for all methods). It reads
+  the original method/URI from `X-Forwarded-*` / `X-Original-*` and the client's `Cookie` /
+  `Authorization`, authenticates, evaluates the route, and answers **200** (+ `X-Auth-Subject` /
+  `X-Auth-Scope` / `X-Auth-Source`), **302**-to-login (unauthenticated browser), **401** (API), or
+  **403** (forbidden).
+- **`auth`** — `SessionAuthenticator` (the shared mini-token `SessionService` over the *same*
+  `sessions.json` mini-oidc writes), `BearerAuthenticator` (mini-token `JwsClaimsVerifier` against
+  the OP JWKS), and the `JwksProvider` SPI (`HttpJwksProvider` in production; injectable in tests).
+- **`service/RoutePolicy`** + **`model`** — config-driven route rules (`routes.json`: ordered
+  prefix rules, `PUBLIC`/`AUTHENTICATED`/`SCOPE`); `SCOPE` decisions defer to a mini-policy
+  `GrantBasedPolicyEngine` built from the caller's scopes. Deny by default for unmatched paths.
+- **`server`** — `ServerMain`/`GatewayServer` (composition root), `ServerConfig`, the reused
+  `http/` router and `store/JsonStore`.
+
+- **Shared session, not a second one.** The SSO session mechanism lives in mini-token
+  (`session/SessionService` + `BrowserSession` + `Sessions`, over the `DocumentStore` SPI). mini-oidc
+  is the sole writer; mini-gateway is a reader of the same file. The session cookie name is the
+  shared `SessionService.DEFAULT_COOKIE_NAME`. For the cookie to reach a gated app, mini-oidc and the
+  app share a hostname (host-only cookie, `Path=/`) — see the README's proxy snippets.
+- **Conventions.** No oracle (failures collapse to 401/403/302; bearer verification fails closed),
+  no secrets in logs, deny-by-default, loopback bind (the proxy reaches it over the loopback/Docker
+  network; never exposed to clients directly).
+- **Docs.** `services/mini-gateway/README.md` — the decision flow, the routes config, and runnable
+  Traefik / Caddy / nginx snippets; `services/mini-gateway/examples/` — `routes.json`, a Traefik
+  `docker-compose`, and a `Caddyfile` that gate a no-auth `whoami` behind a mini-oidc login.

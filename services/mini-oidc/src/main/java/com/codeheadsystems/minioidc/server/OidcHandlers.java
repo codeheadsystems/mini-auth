@@ -5,7 +5,6 @@ import com.codeheadsystems.minioidc.auth.RecoveryAuthenticator;
 import com.codeheadsystems.minioidc.directory.DirectoryUser;
 import com.codeheadsystems.minioidc.directory.UserDirectory;
 import com.codeheadsystems.minioidc.model.AuthorizationCode;
-import com.codeheadsystems.minioidc.model.BrowserSession;
 import com.codeheadsystems.minioidc.model.OidcClient;
 import com.codeheadsystems.minioidc.model.PendingAuthorization;
 import com.codeheadsystems.minioidc.server.dto.Dtos.ClientView;
@@ -23,9 +22,11 @@ import com.codeheadsystems.minioidc.service.OidcTokens;
 import com.codeheadsystems.minioidc.service.PendingAuthorizationStore;
 import com.codeheadsystems.minioidc.service.RefreshTokenService;
 import com.codeheadsystems.minioidc.service.ScopeAuthorizer;
-import com.codeheadsystems.minioidc.service.SessionService;
 import com.codeheadsystems.minioidc.util.Pkce;
 import com.codeheadsystems.minioidc.util.Tokens;
+import com.codeheadsystems.minitoken.session.BrowserSession;
+import com.codeheadsystems.minitoken.session.SessionService;
+import com.codeheadsystems.minitoken.token.JwsClaimsVerifier;
 import tools.jackson.databind.JsonNode;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -378,7 +379,7 @@ public final class OidcHandlers {
     final String bearer = header != null && header.regionMatches(true, 0, "Bearer ", 0, 7)
         ? header.substring(7).trim() : null;
     final Optional<JsonNode> claims = bearer == null ? Optional.empty()
-        : com.codeheadsystems.minioidc.service.OidcTokenVerifier.verify(
+        : JwsClaimsVerifier.verify(
             bearer, tokens.jwkSet(), config.issuer(), tokens.accessAudience(), clock, 5);
     if (claims.isEmpty()) {
       // RFC 6750: a bad/expired token gets a generic 401 challenge, no detail.

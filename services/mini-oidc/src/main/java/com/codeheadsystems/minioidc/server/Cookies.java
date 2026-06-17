@@ -16,8 +16,8 @@ package com.codeheadsystems.minioidc.server;
  */
 public final class Cookies {
 
-  /** The browser SSO session cookie name. */
-  public static final String SESSION = "mioidc_session";
+  /** The browser SSO session cookie name (shared with the rest of the family via mini-token). */
+  public static final String SESSION = com.codeheadsystems.minitoken.session.SessionService.DEFAULT_COOKIE_NAME;
 
   private final boolean secure;
 

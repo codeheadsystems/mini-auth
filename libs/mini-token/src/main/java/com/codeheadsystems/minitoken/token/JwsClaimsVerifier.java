@@ -1,10 +1,7 @@
-package com.codeheadsystems.minioidc.service;
+package com.codeheadsystems.minitoken.token;
 
 import com.codeheadsystems.minitoken.jwks.Jwk;
 import com.codeheadsystems.minitoken.jwks.JwkSet;
-import com.codeheadsystems.minitoken.token.Base64Url;
-import com.codeheadsystems.minitoken.token.Jws;
-import com.codeheadsystems.minitoken.token.JwsHeader;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import java.security.PublicKey;
@@ -12,20 +9,21 @@ import java.time.Clock;
 import java.util.Optional;
 
 /**
- * Offline verification of a mini-oidc-minted ID or access token against a published {@link JwkSet}.
+ * Offline verification of any compact JWS minted by this token plane, returning its claims as JSON.
  *
- * <p>This is exactly what any relying party (or {@code /userinfo}, or a resource server) does with
- * one of our tokens and the JWKS — it needs no call back to the OP. It reuses the token plane's
- * primitives: select the key by the JWS {@code kid}, check the Ed25519 signature with mini-token's
- * {@link Jws#verifySignature}, then validate {@code iss} / {@code aud} / the {@code nbf}/{@code exp}
- * window. Signature first, so unsigned claim data is never trusted; on any failure it returns empty
- * — never an oracle for which check failed.
+ * <p>This is the reference verifier a relying party, a {@code /userinfo} endpoint, or a forward-auth
+ * gateway uses with a token and the published JWKS — no call back to the issuer. It is claim-shape
+ * agnostic (it returns a {@link JsonNode}), so it serves both mini-idp's fixed claim set and
+ * mini-oidc's OIDC ID/access tokens. The order is load-bearing: select the key by the JWS
+ * {@code kid}, check the Ed25519 signature with {@link Jws#verifySignature}, and only then read and
+ * validate {@code iss} / {@code aud} / the {@code nbf}/{@code exp} window. On any failure it returns
+ * empty — never an oracle for which check failed.
  */
-public final class OidcTokenVerifier {
+public final class JwsClaimsVerifier {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
-  private OidcTokenVerifier() {
+  private JwsClaimsVerifier() {
   }
 
   /**
@@ -33,8 +31,9 @@ public final class OidcTokenVerifier {
    *
    * @param token            the compact JWS.
    * @param jwkSet           the published public keys.
-   * @param expectedIssuer   the {@code iss} the token must carry.
-   * @param expectedAudience the {@code aud} the token must carry (string, or an array containing it).
+   * @param expectedIssuer   the {@code iss} the token must carry (null to skip).
+   * @param expectedAudience the {@code aud} the token must carry — a string, or an array containing
+   *                         it (null to skip).
    * @param clock            the clock for the time-window check.
    * @param leewaySeconds    permitted clock skew on {@code nbf}/{@code exp}.
    * @return the verified claims as a JSON object, or empty if anything failed.

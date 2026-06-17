@@ -1,0 +1,7 @@
+{
+  "routes": [
+    { "pathPrefix": "/health", "access": "PUBLIC" },
+    { "pathPrefix": "/admin",  "access": "SCOPE", "scope": "admin" },
+    { "pathPrefix": "/",       "access": "AUTHENTICATED" }
+  ]
+}

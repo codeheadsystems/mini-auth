@@ -11,11 +11,12 @@ import com.codeheadsystems.minioidc.service.OidcTokens;
 import com.codeheadsystems.minioidc.service.PendingAuthorizationStore;
 import com.codeheadsystems.minioidc.service.RefreshTokenService;
 import com.codeheadsystems.minioidc.service.ScopeAuthorizer;
-import com.codeheadsystems.minioidc.service.SessionService;
 import com.codeheadsystems.minioidc.store.ClientRegistry;
 import com.codeheadsystems.minioidc.store.JsonStore;
 import com.codeheadsystems.minioidc.util.Tokens;
 import com.codeheadsystems.minitoken.service.SigningKeyService;
+import com.codeheadsystems.minitoken.session.SessionService;
+import com.codeheadsystems.minitoken.session.Sessions;
 import com.codeheadsystems.minitoken.store.TokenStoreDocuments.SigningKeys;
 import com.codeheadsystems.minitoken.util.RandomIds;
 import com.sun.net.httpserver.HttpServer;
@@ -79,7 +80,9 @@ public final class OidcServer {
         config.accessAudience(), config.idTtl(), config.accessTtl());
 
     final OidcHandlers handlers = new OidcHandlers(config, clients, tokens, new ScopeAuthorizer(),
-        directory, humans, recovery, new SessionService(clock, tokenGen, config.sessionTtl()),
+        directory, humans, recovery,
+        new SessionService(new JsonStore<>(config.dataDir().resolve("sessions.json"), Sessions.class),
+            clock, config.sessionTtl()),
         new PendingAuthorizationStore(clock, Duration.ofMinutes(10)),
         new AuthorizationCodeStore(clock),
         new RefreshTokenService(clock, tokenGen, config.refreshTtl()),
