@@ -62,7 +62,7 @@ Every mini, its one-line purpose, whether it is a library or a service, and its 
 | **mini-idp** | Machine-to-machine identity: OAuth2 client-credentials → Ed25519 JWT, JWKS. | service (+ core lib) | **shipping** |
 | **mini-token** | The shared token plane: JWS, JWKS, signing-key lifecycle, rotation, revocation, audit, the `grants` claim contract, and a small persistence SPI. Extracted from mini-idp; mini-idp now consumes it. | library | **shipping** |
 | **mini-policy** | Generalized authorization decision function: `(principal, resource, action) → allow/deny`. Generalizes mini-kms's `KeyAuthorizationPolicy`. | library | **scaffolded** |
-| **mini-oidc** | Human SSO / OpenID Provider: authorization-code + PKCE, ID + access tokens, browser SSO sessions, login/consent UI. Uses **pk-auth** for the passkey credential layer. | service | **scaffolded** |
+| **mini-oidc** | Human SSO / OpenID Provider: authorization-code + PKCE, ID + access + refresh tokens, /userinfo, browser SSO sessions, single logout, login/consent UI. Embeds **pk-auth** (passkeys + backup-code recovery), mints via **mini-token**, authorizes scopes via **mini-policy**, resolves users from **mini-directory**. | service | **shipping** |
 | **mini-gateway** | Forward-auth endpoint for a reverse proxy (Traefik / Caddy / nginx `auth_request`) to gate apps with no native auth. | service | **scaffolded** |
 | **mini-directory** | The single identity source of truth: humans, groups, roles, service accounts, and their grant mappings; resolves any account to a mini-policy `Principal` + expanded grants. | service | **shipping** (standalone; issuers not yet wired to read from it) |
 | **pk-auth** | Passkeys-first auth library set, published on Maven Central under `com.codeheadsystems`. Consumed as a normal dependency — **not vendored**. | external library | **shipping (external)** |
@@ -257,8 +257,14 @@ resolving service accounts, mini-oidc resolving humans — and the open question
 mini-idp's client registry in. That integration is deliberately not done yet; the service stands
 alone today.
 
-**Phase 4 — Human SSO.** Build **mini-oidc**: auth-code + PKCE, ID/access tokens via mini-token,
-SSO sessions, login/consent UI, passkeys via pk-auth, users from mini-directory.
+**Phase 4 — Human SSO.** *Done.* **mini-oidc** ships: the authorization-code + PKCE flow, ID +
+access tokens minted via mini-token (offline-verifiable against the shared JWKS) + rotating refresh
+tokens, /userinfo, secure-cookie SSO sessions (lifetime distinct from token TTLs), single logout, a
+minimal CSRF-protected login/consent UI, passkeys (+ backup-code recovery) via embedded pk-auth,
+scope authorization via mini-policy, and a `UserDirectory` SPI that resolves humans from
+mini-directory over HTTP. What remains optional/hardening: gating passkey enrolment, persisting the
+pk-auth credential store (swap the in-memory SPIs for pk-auth's JDBI/DynamoDB), and wiring the
+magic-link / OTP recovery flows (the same `RecoveryAuthenticator` seam backup codes use).
 
 **Phase 5 — Gate everything.** Build **mini-gateway**: a forward-auth endpoint for the reverse
 proxy, verifying tokens via mini-token and deciding via mini-policy, redirecting browsers to

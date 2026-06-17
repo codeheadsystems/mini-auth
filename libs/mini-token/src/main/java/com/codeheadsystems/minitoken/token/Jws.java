@@ -7,6 +7,7 @@ import java.security.GeneralSecurityException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.Signature;
+import java.util.Map;
 
 /**
  * Hand-rolled compact-serialization JWS (RFC 7515), signed with Ed25519/EdDSA.
@@ -43,6 +44,35 @@ public final class Jws {
    * @return the compact JWS: {@code header.payload.signature}.
    */
   public static String sign(final JwsHeader header, final JwtClaims claims, final PrivateKey privateKey) {
+    final String headerSegment = Base64Url.encode(toJson(header));
+    final String payloadSegment = Base64Url.encode(toJson(claims));
+    final String signingInput = headerSegment + "." + payloadSegment;
+    final byte[] signature = ed25519Sign(privateKey, signingInput.getBytes(StandardCharsets.US_ASCII));
+    return signingInput + "." + Base64Url.encode(signature);
+  }
+
+  /**
+   * Sign an arbitrary claim set into a compact JWS string, using the same signing-input and
+   * Ed25519 signature as {@link #sign(JwsHeader, JwtClaims, PrivateKey)} — only the payload is a
+   * caller-supplied claims map rather than the fixed {@link JwtClaims} record.
+   *
+   * <p>This exists for issuers whose claim shape is not mini-idp's (e.g. mini-oidc's OpenID Connect
+   * ID tokens and scope-bearing access tokens, which carry claims like {@code nonce}, {@code
+   * auth_time}, {@code scope}, {@code email}). They reuse this token plane's keys, JWKS, rotation,
+   * and exact wire format — the point is precisely that those issuers do NOT re-implement JWS — while
+   * remaining free to choose their own claims. Verification is the same as for any other token:
+   * {@link #split}, select the JWK by {@code kid}, {@link #verifySignature}, then read the payload.
+   *
+   * <p>Use a {@link java.util.LinkedHashMap} for {@code claims} if a stable field order matters; the
+   * map is serialized verbatim, so omit (rather than null) any claim that should not appear.
+   *
+   * @param header     the protected header (carries {@code kid}).
+   * @param claims     the claim set serialized as the JSON payload.
+   * @param privateKey the Ed25519 private key.
+   * @return the compact JWS: {@code header.payload.signature}.
+   */
+  public static String sign(final JwsHeader header, final Map<String, ?> claims,
+                            final PrivateKey privateKey) {
     final String headerSegment = Base64Url.encode(toJson(header));
     final String payloadSegment = Base64Url.encode(toJson(claims));
     final String signingInput = headerSegment + "." + payloadSegment;

@@ -2,8 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this
 repository. It is the **single** guide for the whole `mini-` family: the umbrella conventions
-first, then a folded-in section per shipping service (mini-kms, mini-idp, mini-directory). There are
-no per-module `CLAUDE.md` files — this is it.
+first, then a folded-in section per shipping service (mini-kms, mini-idp, mini-directory, mini-oidc).
+There are no per-module `CLAUDE.md` files — this is it.
 
 > **Read first.** `docs/DIRECTION.md` is the canonical map of the family — the vision, the
 > component catalog, the architecture, the runtime relationships, the roadmap, and the
@@ -69,7 +69,7 @@ JDK 21+ on `PATH` (the Gradle toolchain is pinned to 21; foojay can auto-downloa
 ./gradlew test         # tests only, all modules
 ./gradlew :services:mini-idp:core:test                              # one module
 ./gradlew :services:mini-kms:core:test --tests "*LocalKeyringTest"  # one class
-./gradlew :services:mini-oidc:installDist                           # runnable launcher (scaffold)
+./gradlew :services:mini-oidc:installDist                           # runnable launcher
 ```
 
 There is **no separate linter/formatter**; `./gradlew build` is the full gate. Tests are JUnit 5.
@@ -98,7 +98,7 @@ mini-auth/
 ├── services/                    # deployable front doors
 │   ├── mini-kms/   {core, server, client}   (shipping)
 │   ├── mini-idp/   {core, server}           (shipping)
-│   ├── mini-oidc/                           (scaffold; embeds pk-auth)
+│   ├── mini-oidc/                           (shipping; human SSO / OpenID Provider, embeds pk-auth)
 │   ├── mini-gateway/                        (scaffold)
 │   ├── mini-directory/                      (shipping; identity source of truth, standalone)
 │   ├── mini-ca/                             (roadmap placeholder)
@@ -112,7 +112,7 @@ mini-auth/
 | --- | --- | --- | --- |
 | mini-kms | `:services:mini-kms:core/server/client` | service | **shipping** (§ below) |
 | mini-idp | `:services:mini-idp:core/server` | service | **shipping** (§ below) |
-| mini-oidc | `:services:mini-oidc` | service (application) | scaffold — embeds pk-auth |
+| mini-oidc | `:services:mini-oidc` | service (application) | **shipping** (§ below) — embeds pk-auth |
 | mini-gateway | `:services:mini-gateway` | service (application) | scaffold |
 | mini-directory | `:services:mini-directory` | service (application) | **shipping** (§ below) |
 | mini-ca | `:services:mini-ca` | service (future) | roadmap placeholder (no logic) |
@@ -335,3 +335,64 @@ services/mini-directory/build/install/mini-directory/bin/mini-directory --port 8
   live server, so keep `openapi.yaml` and the routes in `ApiHandlers` in sync.
 - **Docs.** `services/mini-directory/README.md` — the record model, the resolution rule, and the
   endpoint list.
+
+---
+
+# Service: mini-oidc (`services/mini-oidc`)
+
+mini-oidc is the **human SSO / OpenID Provider**: the OAuth 2.0 **authorization-code flow with
+PKCE**, authenticating people with **passkeys** (WebAuthn) and issuing **ID + access tokens** (plus
+rotating **refresh tokens**) that verify offline against the shared JWKS. Where mini-idp
+authenticates machines, mini-oidc authenticates people. **Shipping**, and **composition over
+reinvention**: it embeds pk-auth, mints through mini-token, decides through mini-policy, and resolves
+identities from mini-directory.
+
+**Run it locally.** Loopback by default; the bootstrap admin token (for client registration) comes
+from env/file, never argv, never logged.
+
+```bash
+export MINIOIDC_ADMIN_TOKEN="$(openssl rand -hex 32)"
+./gradlew :services:mini-oidc:installDist
+services/mini-oidc/build/install/mini-oidc/bin/mini-oidc \
+  --port 8477 --issuer https://oidc.example --rp-id oidc.example --rp-origin https://oidc.example \
+  --directory-url http://127.0.0.1:8466 --secure-cookies
+# Discovery at /.well-known/openid-configuration, JWKS at /jwks.json, docs at /docs.
+```
+
+**Architecture.** One application module under base package `com.codeheadsystems.minioidc`:
+
+- **`auth`** — the human-authentication seam. `HumanAuthenticator` (passkey ceremony) is implemented
+  by `PkAuthHumanAuthenticator` over pk-auth's `PasskeyAuthenticationService`; `RecoveryAuthenticator`
+  wraps pk-auth's `BackupCodeService` for fallback login. `PasskeyStack` assembles the embedded
+  pk-auth stack over its in-memory SPIs (the documented swap point for persistent credential storage;
+  reading the authenticated `UserHandle` off the verified assertion, never pk-auth's JWT).
+- **`directory`** — the `UserDirectory` SPI that resolves an authenticated human to a mini-policy
+  `Principal` + grants + profile claims. `HttpUserDirectory` is the production path (calls
+  mini-directory's `/admin/principals/{id}/resolution`); `InMemoryUserDirectory` backs tests/dev.
+- **`service`** — `OidcTokens` mints ID/access tokens via mini-token's keys + `Jws` (see below);
+  `OidcTokenVerifier` is the offline reference verifier; `ScopeAuthorizer` authorizes scopes through
+  mini-policy; plus the flow stores (`PendingAuthorizationStore`, `AuthorizationCodeStore` with
+  replay→family-revoke, `SessionService`, `RefreshTokenService` rotating with replay defense,
+  `ClientService`).
+- **`server`** — `ServerMain`/`OidcServer` (composition root), `ServerConfig`, `OidcHandlers` (every
+  endpoint), `LoginPages` (minimal login/consent UI), `Cookies`, `AdminAuthenticator`, the reused
+  `http/` router, and the OpenAPI/Swagger serving.
+
+- **The token plane is REUSED, not re-implemented.** ID/access tokens are signed with mini-token's
+  `SigningKeyService` keys and published through its JWKS + rotation. The only addition to mini-token
+  was an **additive** generic `Jws.sign(JwsHeader, Map, PrivateKey)` overload, so OIDC claim sets
+  (`nonce`, `auth_time`, `scope`, profile/email) sign with the same format and keys — mini-idp's
+  typed path is untouched.
+- **Browser-flow security.** Secure (configurable), HttpOnly, SameSite=Lax session cookie; the SSO
+  **session lifetime is distinct from the token TTLs**; per-pending-authorization **CSRF token** on
+  every state-changing browser POST; PKCE **mandatory** for every code request; redirect only to
+  pre-registered URIs. Loopback by default — any LAN exposure MUST be behind a TLS reverse proxy with
+  `--secure-cookies`.
+- **Conventions.** No oracle (one `invalid_grant` for every code/refresh failure, one
+  `invalid_client` for client-auth failure, one `invalid_token` at userinfo), constant-time secret
+  comparison, no secrets in logs. **The OpenAPI spec is the contract** — `OpenApiContractTest` keeps
+  `openapi.yaml` and the routes in sync.
+- **Not yet wired by default.** `--directory-url` is optional; without it an empty in-memory
+  directory is used (nobody resolves). Passkey enrolment (`/register/passkey/**`) is currently
+  unauthenticated self-enrolment — a real deployment gates it.
+- **Docs.** `services/mini-oidc/README.md` — the flow, the endpoint list, and the security model.

@@ -1,0 +1,318 @@
+openapi: 3.1.0
+info:
+  title: mini-oidc
+  version: "1.0.0"
+  description: |
+    **mini-oidc** is a small human-facing OpenID Provider. It runs the OAuth 2.0
+    authorization-code flow with **PKCE**, authenticates people with **passkeys** (WebAuthn, via
+    pk-auth) plus backup-code recovery, manages a browser SSO session, and issues **ID + access
+    tokens** signed by the shared **mini-token** plane (so they verify offline against the JWKS) plus
+    rotating **refresh tokens**. Scopes are authorized against the user's grants by **mini-policy**,
+    and the user is resolved from **mini-directory**.
+
+    This document is the authoritative contract. The browser flow ({@code /authorize} →
+    login/consent → redirect with `code`) is HTML + redirects; the programmatic surface is the token
+    endpoint, userinfo, discovery, and JWKS. A relying party verifies an ID token by fetching
+    `/jwks.json`, selecting the key by the JWS `kid`, checking the `EdDSA` signature, and validating
+    `iss` / `aud` / the time window.
+servers:
+  - url: http://127.0.0.1:8477
+    description: Default loopback bind address.
+
+tags:
+  - name: oidc
+    description: Discovery, authorization, token, and userinfo.
+  - name: jwks
+    description: Public signing keys for offline verification.
+  - name: login
+    description: Browser login (passkey + recovery) and consent.
+  - name: admin
+    description: Client registry, guarded by the bootstrap admin bearer token.
+  - name: meta
+    description: Health and the served specification.
+
+paths:
+  /health:
+    get:
+      tags: [meta]
+      summary: Liveness check
+      responses:
+        "200": { description: The service is up. }
+
+  /.well-known/openid-configuration:
+    get:
+      tags: [oidc]
+      summary: OpenID Provider discovery document
+      responses:
+        "200": { description: The discovery document. }
+
+  /jwks.json:
+    get:
+      tags: [jwks]
+      summary: Public signing keys (JWK Set)
+      description: The current public signing keys (active + recently-retired, overlapping `kid`s).
+      responses:
+        "200": { description: The JWK Set. }
+
+  /authorize:
+    get:
+      tags: [oidc]
+      summary: Authorization endpoint (code flow + PKCE)
+      description: |
+        Validates the client, redirect URI, `response_type=code`, the `openid` scope, and the
+        mandatory PKCE `code_challenge`, then shows the login page (no session) or the consent page
+        (existing session). Parameter errors after a valid client/redirect are reported by
+        redirecting to the redirect URI with `error`.
+      parameters:
+        - { name: client_id, in: query, required: true, schema: { type: string } }
+        - { name: redirect_uri, in: query, required: true, schema: { type: string } }
+        - { name: response_type, in: query, required: true, schema: { type: string, enum: [code] } }
+        - { name: scope, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: nonce, in: query, schema: { type: string } }
+        - { name: code_challenge, in: query, required: true, schema: { type: string } }
+        - { name: code_challenge_method, in: query, schema: { type: string, enum: [S256, plain] } }
+      responses:
+        "200": { description: The login or consent HTML page. }
+        "302": { description: Redirect to the redirect URI with an error. }
+        "400": { description: Invalid client or redirect URI (not redirected). }
+
+  /authorize/continue:
+    get:
+      tags: [login]
+      summary: Resume an authorization after login
+      description: Re-evaluates a pending authorization once a session exists; shows the consent page.
+      parameters:
+        - { name: req, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The consent (or login) HTML page. }
+        "400": { description: Unknown or expired authorization request. }
+
+  /authorize/decision:
+    post:
+      tags: [login]
+      summary: Record the consent decision
+      description: |
+        Approves or denies a pending authorization (CSRF-protected, session-required). On approval,
+        mints a one-time code and redirects to the redirect URI with `code` + `state`; on denial,
+        redirects with `error=access_denied`.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                requestId: { type: string }
+                csrf: { type: string }
+                decision: { type: string, enum: [approve, deny] }
+      responses:
+        "302": { description: Redirect to the client's redirect URI. }
+        "400": { description: Unknown request, no session, or CSRF mismatch. }
+
+  /login/passkey/start:
+    post:
+      tags: [login]
+      summary: Begin a passkey assertion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requestId: { type: string }
+                username: { type: string }
+      responses:
+        "200": { description: The WebAuthn assertion options (challengeId + publicKey). }
+        "400": { description: Unknown or expired authorization request. }
+
+  /login/passkey/finish:
+    post:
+      tags: [login]
+      summary: Finish a passkey assertion
+      description: Verifies the authenticator's response; on success sets the session cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requestId: { type: string }
+                csrf: { type: string }
+                challengeId: { type: string }
+                assertion: { type: object }
+      responses:
+        "200": { description: Authenticated; body carries the `next` URL, Set-Cookie sets the session. }
+        "400": { description: Unknown request or CSRF mismatch. }
+        "401": { description: Authentication failed (generic; no oracle). }
+
+  /login/recovery:
+    post:
+      tags: [login]
+      summary: Fallback login with a backup code
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                requestId: { type: string }
+                csrf: { type: string }
+                username: { type: string }
+                code: { type: string }
+      responses:
+        "302": { description: Authenticated; redirect to resume the authorization. }
+        "400": { description: Unknown request or CSRF mismatch. }
+        "401": { description: Recovery failed (generic; no oracle). }
+
+  /token:
+    post:
+      tags: [oidc]
+      summary: Token endpoint (authorization_code + refresh_token grants)
+      description: |
+        Exchanges a code (with the PKCE `code_verifier`) or a refresh token for an ID token, an
+        access token, and a rotated refresh token. Confidential clients authenticate by
+        `client_secret_post` or HTTP Basic. Any grant-validation failure returns a single generic
+        `invalid_grant`; any client-auth failure a single `invalid_client`.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type]
+              properties:
+                grant_type: { type: string, enum: [authorization_code, refresh_token] }
+                code: { type: string }
+                redirect_uri: { type: string }
+                code_verifier: { type: string }
+                refresh_token: { type: string }
+                client_id: { type: string }
+                client_secret: { type: string }
+      responses:
+        "200": { description: The token response (access_token, id_token, refresh_token, ...). }
+        "400": { description: Invalid or unsupported grant. }
+        "401": { description: Client authentication failed. }
+
+  /userinfo:
+    get:
+      tags: [oidc]
+      summary: UserInfo endpoint
+      description: Returns claims for the access token's subject, filtered by granted scope.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: The userinfo claims. }
+        "401": { description: Missing or invalid access token. }
+
+  /logout:
+    get:
+      tags: [oidc]
+      summary: Single logout (end session)
+      description: |
+        Destroys the browser SSO session, revokes the subject's refresh tokens, and clears the
+        session cookie. Redirects to `post_logout_redirect_uri` if supplied.
+      parameters:
+        - { name: post_logout_redirect_uri, in: query, schema: { type: string } }
+        - { name: id_token_hint, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Logged out. }
+        "302": { description: Redirect to the post-logout URI. }
+
+  /register/passkey/start:
+    post:
+      tags: [login]
+      summary: Begin passkey enrolment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: { type: string }
+                displayName: { type: string }
+      responses:
+        "200": { description: The WebAuthn registration options. }
+
+  /register/passkey/finish:
+    post:
+      tags: [login]
+      summary: Finish passkey enrolment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                challengeId: { type: string }
+                username: { type: string }
+                registration: { type: object }
+      responses:
+        "201": { description: The passkey was registered. }
+        "400": { description: Registration failed. }
+
+  /admin/clients:
+    post:
+      tags: [admin]
+      summary: Register a relying-party client
+      description: Creates a client; returns the one-time secret for a confidential client.
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                redirectUris: { type: array, items: { type: string } }
+                scopes: { type: array, items: { type: string } }
+                confidential: { type: boolean }
+      responses:
+        "201": { description: The created client (with a one-time secret if confidential). }
+        "400": { description: Invalid request (e.g. no redirect URI). }
+        "401": { description: Missing or invalid admin token. }
+    get:
+      tags: [admin]
+      summary: List clients
+      description: Lists all clients; never returns secret material.
+      security: [{ adminBearer: [] }]
+      responses:
+        "200": { description: The clients. }
+        "401": { description: Missing or invalid admin token. }
+
+  /openapi.yaml:
+    get:
+      tags: [meta]
+      summary: This specification, as YAML
+      responses:
+        "200": { description: The OpenAPI document (YAML). }
+
+  /openapi.json:
+    get:
+      tags: [meta]
+      summary: This specification, as JSON
+      responses:
+        "200": { description: The OpenAPI document (JSON). }
+
+  /docs:
+    get:
+      tags: [meta]
+      summary: Swagger UI
+      responses:
+        "200": { description: HTML page. }
+
+components:
+  securitySchemes:
+    adminBearer:
+      type: http
+      scheme: bearer
+      description: "The bootstrap admin token, presented as `Authorization: Bearer <token>`."
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: "An issued access token, presented as `Authorization: Bearer <token>`."

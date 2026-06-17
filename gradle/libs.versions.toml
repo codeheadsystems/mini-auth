@@ -25,5 +25,13 @@ bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "boun
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
 
 # --- pk-auth (external, Maven Central, com.codeheadsystems) -----------------------------
-# The passkey credential layer mini-oidc builds its login/registration ceremonies on.
+# The passkey credential layer mini-oidc builds its login/registration ceremonies on. All modules
+# share the one `pk-auth` version. Core is the framework-neutral ceremony engine; the alt-flow
+# modules back mini-oidc's fallback/recovery login methods; the testkit (test scope) provides the
+# in-memory SPIs + FakeAuthenticator that drive a real WebAuthn ceremony without a browser.
 pk-auth-core = { module = "com.codeheadsystems:pk-auth-core", version.ref = "pk-auth" }
+pk-auth-jwt = { module = "com.codeheadsystems:pk-auth-jwt", version.ref = "pk-auth" }
+pk-auth-magic-link = { module = "com.codeheadsystems:pk-auth-magic-link", version.ref = "pk-auth" }
+pk-auth-otp = { module = "com.codeheadsystems:pk-auth-otp", version.ref = "pk-auth" }
+pk-auth-backup-codes = { module = "com.codeheadsystems:pk-auth-backup-codes", version.ref = "pk-auth" }
+pk-auth-testkit = { module = "com.codeheadsystems:pk-auth-testkit", version.ref = "pk-auth" }

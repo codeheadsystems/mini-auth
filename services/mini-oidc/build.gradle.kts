@@ -1,18 +1,20 @@
 /*
- * mini-oidc - human SSO / OpenID Provider (SCAFFOLD).
+ * mini-oidc - human SSO / OpenID Provider.
  *
- * The human-facing front door of the family: authorization-code + PKCE, ID + access tokens,
- * browser SSO sessions, and a login/consent UI. Where mini-idp authenticates MACHINES
- * (client-credentials), mini-oidc authenticates PEOPLE.
+ * The human-facing front door of the family: authorization-code + PKCE, ID + access tokens, a
+ * /userinfo endpoint, browser SSO sessions, refresh tokens, single logout, and a minimal
+ * login/consent UI. Where mini-idp authenticates MACHINES (client-credentials), mini-oidc
+ * authenticates PEOPLE.
  *
  * Composition, not reinvention:
- *   - pk-auth-core (Maven Central, NOT vendored) provides the passkeys-first credential layer
- *     the login/registration ceremonies are built on.
- *   - mini-token will mint the ID/access tokens and publish the JWKS (shared with mini-idp).
- *   - mini-policy evaluates consent/scope authorization decisions.
- *
- * This module is a scaffold: a runnable entry point and a health check, with the real OIDC
- * protocol and crypto left as clearly-marked TODOs. No half-built auth.
+ *   - pk-auth-core (Maven Central, NOT vendored) runs the WebAuthn passkey ceremony; pk-auth's
+ *     alt-flow modules (backup-codes here; magic-link / otp share the same recovery seam) back
+ *     account recovery.
+ *   - mini-token mints the ID/access tokens and publishes the JWKS + signing-key rotation — the
+ *     token plane is REUSED, never re-implemented here.
+ *   - mini-policy authorizes the requested OIDC scopes against the user's grants.
+ *   - the authenticated human is resolved to a Principal "via mini-directory" through a small
+ *     UserDirectory SPI (an HTTP client to mini-directory's resolution endpoint in production).
  */
 
 plugins {
@@ -20,11 +22,24 @@ plugins {
 }
 
 dependencies {
-    // The passkey credential layer (external dependency, consumed from Maven Central).
+    // The passkey credential layer + a recovery alt-flow (external, from Maven Central).
     implementation(libs.pk.auth.core)
-    // Shared family libraries.
+    implementation(libs.pk.auth.backup.codes)
+    // Shared family libraries: the token plane and the decision function.
     implementation(project(":libs:mini-token"))
     implementation(project(":libs:mini-policy"))
+    // Argon2id for confidential-client secret hashing (same pattern as the siblings).
+    implementation(libs.bouncycastle)
+    // JSON for tokens, stores, DTOs, and (de)serializing pk-auth's ceremony DTOs.
+    implementation(libs.jackson.databind)
+    // Parses the checked-in openapi.yaml so /openapi.json can be served from the same source.
+    implementation(libs.jackson.yaml)
+
+    // pk-auth's in-memory SPI implementations: they back the standalone server's passkey store
+    // (the documented swap point for a persistent CredentialRepository/UserLookup/ChallengeStore),
+    // and the test classpath also uses the testkit's FakeAuthenticator to drive a real WebAuthn
+    // ceremony without a browser. pk-auth sanctions the testkit on the main classpath for this.
+    implementation(libs.pk.auth.testkit)
     // JUnit 5 (jupiter + launcher) is supplied by the convention plugin.
 }
 
