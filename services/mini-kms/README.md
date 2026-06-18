@@ -435,13 +435,13 @@ Requires a JDK 21+ on `PATH` (the toolchain is pinned to 21).
 
 ```bash
 ./gradlew build                                     # compile + all tests
-./gradlew :server:installDist :client:installDist   # runnable launcher scripts
+./gradlew :services:mini-kms:server:installDist :services:mini-kms:client:installDist   # runnable launcher scripts
 ```
 
 Launchers:
-- `server/build/install/server/bin/server`
-- `client/build/install/client/bin/client`   (data plane)
-- `client/build/install/client/bin/kms-admin` (control plane)
+- `services/mini-kms/server/build/install/server/bin/server`
+- `services/mini-kms/client/build/install/client/bin/client`   (data plane)
+- `services/mini-kms/client/build/install/client/bin/kms-admin` (control plane)
 
 ---
 
@@ -455,7 +455,7 @@ keystore (with a `default` key group); later runs validate the passphrase
 ```bash
 export MINIKMS_API_TOKEN="$(openssl rand -hex 32)"
 export MINIKMS_ADMIN_TOKEN="$(openssl rand -hex 32)"
-server/build/install/server/bin/server \
+services/mini-kms/server/build/install/server/bin/server \
   --tcp-port 9123 \
   --unix-socket /run/user/$UID/mini-kms.sock \
   --keystore   ~/.mini-kms/keystore.json
@@ -472,8 +472,8 @@ Stop with `Ctrl-C`; the shutdown hook zeros the root key and every KEK.
 
 ```bash
 export MINIKMS_API_TOKEN="…"
-C=client/build/install/client/bin/client
-A=client/build/install/client/bin/kms-admin
+C=services/mini-kms/client/build/install/client/bin/client
+A=services/mini-kms/client/build/install/client/bin/kms-admin
 
 $C --tcp 127.0.0.1:9123 health
 $A --tcp 127.0.0.1:9123 create-key --key billing
@@ -493,7 +493,7 @@ $C --tcp 127.0.0.1:9123 reencrypt --in report.mke --out report.archived.mke --ke
 
 ```bash
 export MINIKMS_ADMIN_TOKEN="…"
-A=client/build/install/client/bin/kms-admin
+A=services/mini-kms/client/build/install/client/bin/kms-admin
 
 $A --tcp 127.0.0.1:9123 list-keys
 $A --tcp 127.0.0.1:9123 create-key      --key billing

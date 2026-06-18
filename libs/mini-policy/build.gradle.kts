@@ -6,9 +6,13 @@
  * mini-kms's `KeyAuthorizationPolicy` (which answers it only for `KeyOperation` against a key
  * group) and of the per-group grant checks a verifier runs over a mini-idp token.
  *
- * Library only — no transport, no HTTP, no CLI. This is a SCAFFOLD: it ships the decision
- * types, the engine seam, and a SAFE deny-by-default engine. Real rule evaluation (roles,
- * grant mappings from mini-directory, scope checks) is TODO.
+ * Library only — no transport, no HTTP, no CLI. It ships the decision types (Principal, Action,
+ * Resource, Grant, Decision), the PolicyEngine seam, and three engines: a SAFE deny-by-default,
+ * an allow-all (the documented test/seam), and the grant-based engine consumed in production by
+ * mini-directory, mini-oidc, mini-gateway, and mini-kms. It is deliberately minimal — it evaluates
+ * the grants it is given. Sourcing those grants family-wide (mini-directory resolution feeding the
+ * issuers; the token -> mini-kms authorization path) is integration work that lives in those
+ * services, tracked in docs/DIRECTION.md — not a gap in this library.
  */
 
 plugins {

@@ -105,7 +105,7 @@ mini-auth/
 │   └── mini-console/                        (roadmap placeholder)
 └── libs/                        # shared libraries (no transport)
     ├── mini-token/                          (shipping; token plane + shared SSO session store)
-    └── mini-policy/                         (scaffold)
+    └── mini-policy/                         (shipping; shared decision engine)
 ```
 
 | Module | Project path | Type | Status |
@@ -118,7 +118,7 @@ mini-auth/
 | mini-ca | `:services:mini-ca` | service (application) | **shipping** (§ below) |
 | mini-console | `:services:mini-console` | service (future) | roadmap placeholder (no logic) |
 | mini-token | `:libs:mini-token` | library | **shipping** (token plane extracted from mini-idp) |
-| mini-policy | `:libs:mini-policy` | library | scaffold |
+| mini-policy | `:libs:mini-policy` | library | **shipping** (shared decision engine; consumed by directory/oidc/gateway/kms) |
 
 - **Convention plugins, not `subprojects {}`.** The shared Java conventions (JDK 21 toolchain,
   Maven Central, JUnit 5 + the common test stack, the `-parameters` flag) live in the `build-logic`

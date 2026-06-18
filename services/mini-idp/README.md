@@ -47,7 +47,7 @@ Requires JDK 21+.
 Service accounts (the OAuth clients) live in **mini-directory**, so run one and point mini-idp at it.
 
 ```bash
-./gradlew :services:mini-directory:installDist :server:installDist
+./gradlew :services:mini-directory:installDist :services:mini-idp:server:installDist
 
 export MINIDIR_ADMIN_TOKEN="$(openssl rand -hex 32)"
 services/mini-directory/build/install/mini-directory/bin/mini-directory --port 8466 --data-dir ~/.mini-directory &
@@ -62,7 +62,7 @@ curl -s -X POST localhost:8466/admin/service-accounts \
 
 export MINIIDP_ADMIN_TOKEN="$(openssl rand -hex 32)"        # mini-idp's own admin credential
 export MINIIDP_DIRECTORY_TOKEN="$MINIDIR_ADMIN_TOKEN"       # so mini-idp may call the directory
-server/build/install/server/bin/server --port 8455 --data-dir ~/.mini-idp \
+services/mini-idp/server/build/install/server/bin/server --port 8455 --data-dir ~/.mini-idp \
   --directory-url http://127.0.0.1:8466 &
 
 # 2) Exchange the client credentials for a token (mini-idp resolves the account from mini-directory).
@@ -232,7 +232,7 @@ verify (offline): access_token --kid--> JWK --EdDSA verify--> claims --map--> Pr
 
 ```bash
 ./gradlew build                 # compile + all tests (the CI gate)
-./gradlew :server:installDist   # runnable launcher at server/build/install/server/bin/server
+./gradlew :services:mini-idp:server:installDist   # launcher at services/mini-idp/server/build/install/server/bin/server
 ```
 
 The test suite covers: token issue + offline JWKS verification; rejection of expired /

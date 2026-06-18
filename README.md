@@ -2,7 +2,7 @@
 
 The umbrella for the **mini-** family: small, readable, **educational-but-homelab-functional**
 auth and identity services, built in the same spirit as
-[mini-kms](../mini-kms/README.md) and [mini-idp](../mini-idp/README.md).
+[mini-kms](services/mini-kms/README.md) and [mini-idp](services/mini-idp/README.md).
 
 mini-auth is two things:
 
@@ -13,10 +13,11 @@ mini-auth is two things:
    of the family: the vision, the catalog, the architecture, the recursive integrations, the open
    design questions, and the roadmap. **Read it first.**
 
-> ⚠️ **Educational project.** The family uses real, sound cryptographic constructions but is not
-> audited and is not a substitute for production identity infrastructure. Several modules here are
-> **scaffolds** — they compile and pass a trivial test, with the real protocol/crypto left as
-> clearly-marked TODOs. They are deliberately *not* half-built services that look finished.
+> ⚠️ **Educational project.** The family uses real, sound cryptographic constructions but is **not
+> audited** and is not a substitute for production identity infrastructure. Six services and both
+> shared libraries (`mini-token`, `mini-policy`) ship and run; only `mini-console` is a roadmap
+> placeholder with no logic yet. Nothing here is a half-built service that *looks* finished —
+> where a module isn't done, it says so.
 
 ## The guiding principle
 
@@ -29,14 +30,14 @@ adds the connective tissue (`mini-token`, `mini-policy`) and the new human-facin
 
 | Mini | Purpose | Type | Status |
 | --- | --- | --- | --- |
-| [mini-kms](services/mini-kms) | Envelope-encryption KMS; the eventual vault wrapping other services' signing keys. | service | **shipping** |
+| [mini-kms](services/mini-kms) | Envelope-encryption KMS; the vault wrapping other services' signing keys. | service | **shipping** |
 | [mini-idp](services/mini-idp) | Machine identity: OAuth2 client-credentials → Ed25519 JWT + JWKS. | service | **shipping** |
-| `mini-token` | Shared token plane: JWS, JWKS, key rotation, revocation, audit. | library | scaffolded |
-| `mini-policy` | Generalized `(principal, resource, action) → allow/deny` decision function. | library | scaffolded |
-| `mini-oidc` | Human SSO / OpenID Provider (auth-code + PKCE); embeds **pk-auth** passkeys. | service | scaffolded |
-| `mini-gateway` | Forward-auth endpoint for a reverse proxy (Traefik / Caddy / nginx). | service | scaffolded |
-| `mini-directory` | Identity source of truth: users, groups, roles, service accounts, grants. | service | scaffolded |
-| `mini-ca` | Internal CA for mTLS / workload identity. | service | roadmap (placeholder) |
+| [mini-token](libs/mini-token) | Shared token plane: JWS, JWKS, key rotation, revocation, audit, SSO session store. | library | **shipping** |
+| [mini-directory](services/mini-directory) | Identity source of truth: humans, service accounts, groups, roles, grants. | service | **shipping** |
+| [mini-oidc](services/mini-oidc) | Human SSO / OpenID Provider (auth-code + PKCE); embeds **pk-auth** passkeys. | service | **shipping** |
+| [mini-gateway](services/mini-gateway) | Forward-auth endpoint for a reverse proxy (Traefik / Caddy / nginx). | service | **shipping** |
+| [mini-ca](services/mini-ca) | Internal CA for mTLS / workload identity; CA key wrapped under mini-kms. | service | **shipping** |
+| [mini-policy](libs/mini-policy) | Generalized `(principal, action, resource) → allow/deny` decision function; the shared authorization engine. | library | **shipping** |
 | `mini-console` | Optional unified admin UI. | service | roadmap (placeholder) |
 | **pk-auth** | Passkeys-first library set on Maven Central — a normal dependency, **not vendored**. | external | shipping |
 
@@ -60,14 +61,14 @@ mini-auth/
 ├── services/                    # deployable front doors
 │   ├── mini-kms/                #   core/ server/ client/  (shipping)
 │   ├── mini-idp/                #   core/ server/          (shipping)
-│   ├── mini-oidc/               #   scaffold; depends on pk-auth, mini-token, mini-policy
-│   ├── mini-gateway/            #   scaffold; depends on mini-token, mini-policy
-│   ├── mini-directory/          #   scaffold; depends on mini-policy
-│   ├── mini-ca/                 #   roadmap placeholder (no logic)
+│   ├── mini-oidc/               #   shipping; human SSO, embeds pk-auth + mini-token + mini-policy + mini-directory
+│   ├── mini-gateway/            #   shipping; forward-auth, reuses mini-token + mini-policy
+│   ├── mini-directory/          #   shipping; identity source of truth
+│   ├── mini-ca/                 #   shipping; internal CA, CA key wrapped under mini-kms
 │   └── mini-console/            #   roadmap placeholder (no logic)
 └── libs/                        # shared libraries (no transport)
-    ├── mini-token/              #   library (scaffold)
-    └── mini-policy/             #   library (scaffold)
+    ├── mini-token/              #   library (shipping)
+    └── mini-policy/             #   library (shipping; shared decision engine)
 ```
 
 Gradle project paths follow the directories: `:services:mini-kms:core`, `:services:mini-idp:server`,
@@ -81,14 +82,14 @@ JUnit 5, and the same Jackson 3.x / Bouncy Castle versions from the one catalog.
 Requires a JDK 21+ on `PATH` (the toolchain is pinned to 21; foojay can auto-download it).
 
 ```bash
-./gradlew build        # compile + test EVERYTHING: the new modules AND vendored mini-kms + mini-idp
+./gradlew build        # compile + test EVERYTHING across the family — this IS the CI gate
 ./gradlew test         # tests only, all modules
-./gradlew :services:mini-oidc:installDist   # a runnable launcher for one scaffolded service
+./gradlew :services:mini-oidc:installDist   # a runnable launcher (services/mini-oidc/build/install/mini-oidc/bin/mini-oidc)
 ```
 
 The first build resolves `pk-auth-core` from Maven Central (for `mini-oidc`) and the Jackson 3.x
-artifacts; after that the build is offline-friendly. The scaffolded service entry points run but
-only print a status banner — they do not yet bind a server (by design).
+artifacts; after that the build is offline-friendly. Each shipping service installs a real launcher
+that binds a loopback HTTP (or socket) server — see the per-service README for how to run it.
 
 ### Build aggregation, in brief
 
@@ -103,6 +104,12 @@ rationale, the layout, and the `mini-common` extraction candidates: the
 
 ## Status & intent
 
-mini-auth is at **Phase 0** of the [roadmap](docs/DIRECTION.md#roadmap): a green umbrella build and
-the correct module skeleton. The next step is extracting mini-idp's token machinery into
-`mini-token`. Nothing here ships finished auth or crypto yet — and where it isn't done, it says so.
+Six services (mini-kms, mini-idp, mini-directory, mini-oidc, mini-gateway, mini-ca) and both shared
+libraries (`mini-token`, `mini-policy`) **ship** — they build, test, and run as their READMEs
+describe. `mini-policy` is deliberately small (the decision types, the engine seam, and a
+grant-based engine consumed by four services); only `mini-console` is a roadmap placeholder. The
+longer arc — notably wiring the token →
+mini-kms authorization path end to end (today mini-kms authenticates with shared per-plane tokens;
+the `grants`-claim → KMS mapping is designed but not yet the live runtime path) and the
+`mini-common` extraction — is tracked in the [roadmap](docs/DIRECTION.md#roadmap). Where a module
+isn't done, it says so.
