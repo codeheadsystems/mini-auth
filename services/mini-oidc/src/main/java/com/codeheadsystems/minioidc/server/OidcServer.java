@@ -64,6 +64,26 @@ public final class OidcServer {
                                   final UserDirectory directory, final HumanAuthenticator humans,
                                   final RecoveryAuthenticator recovery, final Clock clock)
       throws IOException {
+    return create(config, adminToken, null, directory, humans, recovery, clock);
+  }
+
+  /**
+   * Build a server, optionally wrapping signing keys under mini-kms.
+   *
+   * @param config      the resolved configuration.
+   * @param adminToken  the bootstrap admin token guarding {@code /admin/**}.
+   * @param kmsApiToken the mini-kms data-plane API token (env/file-resolved), or null to store
+   *                    signing keys plaintext-at-0600 (the default educational path).
+   * @param directory   resolves an authenticated human to a principal + grants.
+   * @param humans      the passkey authenticator.
+   * @param recovery    the fallback/recovery authenticator.
+   * @param clock       the clock shared by every time-dependent service.
+   * @return a built, not-yet-started server.
+   */
+  public static OidcServer create(final ServerConfig config, final String adminToken,
+                                  final String kmsApiToken, final UserDirectory directory,
+                                  final HumanAuthenticator humans, final RecoveryAuthenticator recovery,
+                                  final Clock clock) throws IOException {
     final Tokens tokenGen = new Tokens();
     final Argon2SecretHasher hasher = new Argon2SecretHasher(config.argonSettings());
 
@@ -74,8 +94,7 @@ public final class OidcServer {
     // Retired signing keys stay published well past the longest token TTL so in-flight tokens verify.
     final Duration retention = maxTtl(config).multipliedBy(2);
     final SigningKeyService signingKeys = new SigningKeyService(
-        new JsonStore<>(config.dataDir().resolve("signing-keys.json"), SigningKeys.class),
-        new RandomIds(), clock, retention);
+        signingKeyStore(config, kmsApiToken), new RandomIds(), clock, retention);
     final OidcTokens tokens = new OidcTokens(signingKeys, clock, config.issuer(),
         config.accessAudience(), config.idTtl(), config.accessTtl());
 
@@ -97,6 +116,22 @@ public final class OidcServer {
 
   private static Duration maxTtl(final ServerConfig config) {
     return config.idTtl().compareTo(config.accessTtl()) >= 0 ? config.idTtl() : config.accessTtl();
+  }
+
+  /**
+   * The signing-key store: plaintext-at-0600 by default, or — when {@code --kms-*} is configured and
+   * an API token was resolved — the same JSON store wrapped by {@code KmsSigningKeyStore}, so the
+   * private keys are envelope-encrypted under a mini-kms key group and never written in the clear.
+   */
+  private static com.codeheadsystems.minitoken.store.DocumentStore<SigningKeys> signingKeyStore(
+      final ServerConfig config, final String kmsApiToken) {
+    final JsonStore<SigningKeys> file =
+        new JsonStore<>(config.dataDir().resolve("signing-keys.json"), SigningKeys.class);
+    if (config.kmsEnabled() && kmsApiToken != null) {
+      return com.codeheadsystems.minikms.client.KmsSigningKeyStore.overTcp(
+          file, config.kmsHost(), config.kmsPort(), kmsApiToken, config.kmsKeyGroup());
+    }
+    return file;
   }
 
   /** Start serving (non-blocking; the JDK server runs its own threads). */

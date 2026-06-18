@@ -5,10 +5,12 @@ import com.codeheadsystems.miniidp.server.http.Router;
 import com.codeheadsystems.miniidp.service.ClientService;
 import com.codeheadsystems.miniidp.store.JsonStore;
 import com.codeheadsystems.miniidp.store.StoreDocuments.ClientRegistry;
+import com.codeheadsystems.minikms.client.KmsSigningKeyStore;
 import com.codeheadsystems.minitoken.service.AuditService;
 import com.codeheadsystems.minitoken.service.RevocationService;
 import com.codeheadsystems.minitoken.service.SigningKeyService;
 import com.codeheadsystems.minitoken.service.TokenIssuer;
+import com.codeheadsystems.minitoken.store.DocumentStore;
 import com.codeheadsystems.minitoken.store.TokenStoreDocuments.Audit;
 import com.codeheadsystems.minitoken.store.TokenStoreDocuments.Revocations;
 import com.codeheadsystems.minitoken.store.TokenStoreDocuments.SigningKeys;
@@ -43,7 +45,7 @@ public final class IdpServer {
   }
 
   /**
-   * Build a server from configuration and a resolved admin token.
+   * Build a server from configuration and a resolved admin token (signing keys stored plaintext).
    *
    * @param config     the resolved configuration.
    * @param adminToken the bootstrap admin token (already resolved from env/file by the caller).
@@ -52,6 +54,21 @@ public final class IdpServer {
    */
   public static IdpServer create(final ServerConfig config, final String adminToken, final Clock clock)
       throws IOException {
+    return create(config, adminToken, null, clock);
+  }
+
+  /**
+   * Build a server, optionally wrapping signing keys under mini-kms.
+   *
+   * @param config      the resolved configuration.
+   * @param adminToken  the bootstrap admin token.
+   * @param kmsApiToken the mini-kms data-plane API token (env/file-resolved by the caller), or null
+   *                    to store signing keys plaintext-at-0600 (the default educational path).
+   * @param clock       the clock shared by every time-dependent service.
+   * @return a built, not-yet-started server.
+   */
+  public static IdpServer create(final ServerConfig config, final String adminToken,
+                                 final String kmsApiToken, final Clock clock) throws IOException {
     final RandomIds ids = new RandomIds();
     final Argon2SecretHasher hasher = new Argon2SecretHasher(config.argonSettings());
 
@@ -59,7 +76,7 @@ public final class IdpServer {
         new JsonStore<>(config.dataDir().resolve("clients.json"), ClientRegistry.class),
         hasher, ids, clock);
     final SigningKeyService signingKeys = new SigningKeyService(
-        new JsonStore<>(config.dataDir().resolve("signing-keys.json"), SigningKeys.class),
+        signingKeyStore(config, kmsApiToken),
         ids, clock, config.retiredKeyRetention());
     final RevocationService revocations = new RevocationService(
         new JsonStore<>(config.dataDir().resolve("revocations.json"), Revocations.class), clock);
@@ -76,6 +93,22 @@ public final class IdpServer {
     http.createContext("/", router);
     http.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     return new IdpServer(http, config);
+  }
+
+  /**
+   * The signing-key store: plaintext-at-0600 by default, or — when {@code --kms-*} is configured and
+   * an API token was resolved — the same JSON store wrapped by {@link KmsSigningKeyStore} so the
+   * private keys are envelope-encrypted under a mini-kms key group and never written in the clear.
+   */
+  private static DocumentStore<SigningKeys> signingKeyStore(final ServerConfig config,
+                                                            final String kmsApiToken) {
+    final JsonStore<SigningKeys> file =
+        new JsonStore<>(config.dataDir().resolve("signing-keys.json"), SigningKeys.class);
+    if (config.kmsEnabled() && kmsApiToken != null) {
+      return KmsSigningKeyStore.overTcp(
+          file, config.kmsHost(), config.kmsPort(), kmsApiToken, config.kmsKeyGroup());
+    }
+    return file;
   }
 
   /** Start serving (non-blocking; the JDK server runs its own threads). */

@@ -13,6 +13,7 @@ understand the whole, read this one.
 - [The component catalog](#the-component-catalog)
 - [System architecture](#system-architecture)
 - [Runtime relationships (what the names don't show)](#runtime-relationships)
+- [Wrapping the signing keys under mini-kms](#wrapping-the-signing-keys-under-mini-kms)
 - [Open design decision: the client registry](#open-design-decision-the-client-registry)
 - [Toward a mini-common library](#toward-a-mini-common-library)
 - [Roadmap](#roadmap)
@@ -151,12 +152,13 @@ the load-bearing relationships:
   key group, the issuers checking a scope — each becomes a `PolicyRequest(principal, resource,
   action)` against one engine. mini-policy is the generalization of mini-kms's
   `KeyAuthorizationPolicy`.
-- **mini-token's signing keys are wrapped by mini-kms (the recursive integration).** Today
-  mini-idp stores its Ed25519 private key locally (`0600`) and flags that "a real deployment would
-  wrap it under a KMS." mini-kms *is* that KMS. So the token plane that issues identity tokens has
-  its own signing keys protected by another mini — the family secures itself. This is the single
-  most important relationship in the design, and the reason mini-kms is described as "the eventual
-  vault that wraps other services' signing keys."
+- **mini-token's signing keys are wrapped by mini-kms (the recursive integration — *done*).** The
+  default educational path still stores the Ed25519 private key locally (`0600`), but with the
+  `--kms-*` config the auth services wrap each signing key under a mini-kms key group: only the
+  envelope ciphertext touches disk, and the key is unwrapped in memory at use. So the token plane
+  that issues identity tokens has its own signing keys protected by another mini — the family
+  secures itself. This is the single most important relationship in the design; its mechanics and
+  bootstrap ordering are detailed in [Wrapping the signing keys under mini-kms](#wrapping-the-signing-keys-under-mini-kms) below.
 - **mini-directory is the identity source of truth that mini-oidc and mini-idp read.** Instead of
   each issuer keeping a private registry, both resolve principals and grants from mini-directory:
   mini-oidc resolves human users, mini-idp resolves service accounts. The grants it stores are the
@@ -166,6 +168,86 @@ The claim payload already lines up across the family. A mini-idp token's `grants
 directly onto mini-kms's authorization model (`sub → Principal.id`, `grants.control →
 Principal.admin`, `grants.groups[] → KeyAuthorizationPolicy`). mini-token preserves that mapping;
 mini-policy is where it is evaluated; mini-directory is where the grants originate.
+
+---
+
+## Wrapping the signing keys under mini-kms
+
+The token plane signs with Ed25519 private keys. By default those keys live in
+`signing-keys.json` (atomic, `0600`) in the clear — the readable, no-extra-moving-parts educational
+path. Switch on the **mini-kms-backed key store** and the same keys are envelope-encrypted under a
+mini-kms key group: **no plaintext signing key ever touches disk.**
+
+### How it works
+
+mini-token's key-at-rest seam is the `store/DocumentStore<SigningKeys>` SPI. There are two
+implementations:
+
+- **Default** — each service's atomic-`0600` `JsonStore` writes the `SigningKeys` document with the
+  private key as base64 PKCS#8 in the clear.
+- **KMS-backed** — `KmsSigningKeyStore` (in `:services:mini-kms:client`) is a *decorator* over that
+  file store. On **save**, it asks mini-kms to `encrypt(keyGroup, PKCS#8, aad=kid)` and stores a
+  `kms1:`-tagged envelope in place of each private key; the delegate then writes the (now
+  ciphertext-only) document `0600`. On **load**, it `decrypt`s each envelope back to plaintext *in
+  memory*, so `SigningKeyService` sees ordinary keys. The `kid` is bound in as the encryption
+  context, so an envelope cannot be moved between records, and untagged (plaintext) fields are passed
+  through so an existing store can be migrated. **Rotation** is unchanged — `SigningKeyService` mints
+  a fresh keypair and the decorator wraps it on the next save. **KEK rotation** is handled by
+  `KmsSigningKeyStore.rewrap()`, which `ReEncrypt`s every wrapped key onto the group's new active
+  version server-side (the plaintext is never exposed), after which the old version can be retired.
+
+The adapter lives on the **mini-kms side** (`:services:mini-kms:client` depends on `mini-token`, never
+the reverse), so the dependency graph stays acyclic. mini-idp and mini-oidc enable it with config —
+`--kms-tcp HOST:PORT`, `--kms-key-group NAME`, and a mini-kms **data-plane** API token from
+`MINI{IDP,OIDC}_KMS_API_TOKEN` / `--kms-api-token-file` — and fall back to the plaintext store when
+it is absent.
+
+### Bootstrap ordering (and why it is not actually circular)
+
+There is an apparent chicken-and-egg: **mini-kms** needs its passphrase; the **auth services** need
+mini-kms; the **first human admin** needs the auth services. It resolves because each layer's
+bootstrap secret is supplied by the **operator, out of band** — nothing depends on a not-yet-existing
+higher layer. The startup sequence:
+
+1. **Start mini-kms.** The operator supplies the passphrase (no-echo TTY, or `MINIKMS_PASSPHRASE`
+   when headless) and the two tokens (`MINIKMS_API_TOKEN`, `MINIKMS_ADMIN_TOKEN`). mini-kms derives
+   its root key from the passphrase and unlocks the keystore. The trust root here is a **human
+   secret**, not another service — this is the bottom turtle.
+2. **Provision the signing-key group (one-time, control plane).** The operator runs
+   `kms-admin create-key-group idp-signing` (and `oidc-signing`), and ensures mini-kms's data-plane
+   policy authorizes the auth services' API token for those groups (the shipped `AllowAllPolicy`
+   permits any authenticated caller; a real `mini-policy` rule gates per group).
+3. **Start the auth services KMS-backed.** With `--kms-*` set, mini-idp / mini-oidc on first run
+   mint their initial signing key, wrap it via mini-kms, and persist only ciphertext; on later starts
+   they load the wrapped keys and unwrap in memory. After load the keys live in memory for the
+   process lifetime, so steady-state issuance does **not** call mini-kms — only startup and rotation
+   do.
+4. **Provision the first human.** Using the auth services' own admin tokens (themselves operator
+   secrets), register an OIDC client in mini-oidc, create the user in mini-directory, and enrol the
+   user's passkey — *then* the human can log in. Human SSO is the top layer and is bootstrapped by
+   operator admin tokens, never by itself.
+
+So the order is **mini-kms → key group + token → auth services → first human**, each gated by an
+operator-supplied secret. The default (no-KMS) path skips steps 1–2 entirely.
+
+### Failure modes
+
+- **mini-kms unreachable at auth-service startup** — the first `save`/`load` fails and the service
+  refuses to start (loud, fail-closed). Because keys are cached in memory after load, a mini-kms
+  outage *after* startup does not stop token issuance until the next rotation or restart. The
+  recommended deployment keeps mini-kms local (loopback/Unix socket) so this dependency is fast and
+  highly available.
+- **Wrong passphrase / mini-kms won't unlock** — mini-kms doesn't start; the auth services see
+  connection refused at step 3 and fail. The passphrase is mini-kms's concern alone.
+- **API token not authorized for the group** — `encrypt`/`decrypt` is denied; mini-kms returns its
+  single generic `DecryptionFailed` (no oracle) and the auth service fails to start.
+- **KEK rotation** — after `kms-admin rotate-key-group NAME`, run the service's `rewrap()` to move
+  the wrapped keys onto the new version; existing envelopes still decrypt against their recorded
+  version until it is destroyed, so there is no hard cutover.
+- **Lost passphrase or destroyed key group (catastrophic)** — the wrapped signing keys are
+  unrecoverable. Recovery is to rotate to fresh signing keys, which invalidates outstanding tokens
+  once the retired-key retention window passes. This is deliberate crypto-shredding, the same
+  irreversibility `DestroyVersion` gives mini-kms itself.
 
 ---
 
@@ -275,8 +357,13 @@ redirect-to-mini-oidc. The README ships runnable Traefik + Caddy snippets that g
 upstream behind a mini-oidc passkey login. Remaining hardening: a `Domain`-scoped session cookie for
 subdomain SSO (today the cookie is host-only, so the OP and gated apps share one hostname).
 
-**Phase 6 — Close the recursive loop.** Wrap mini-token's signing keys under **mini-kms** so no
-private signing key sits in plaintext on disk anywhere in the family.
+**Phase 6 — Close the recursive loop.** *Done.* mini-token's key-at-rest seam
+(`store/DocumentStore<SigningKeys>`) has a mini-kms-backed implementation (`KmsSigningKeyStore`):
+with `--kms-*` set, mini-idp and mini-oidc wrap each Ed25519 signing key under a mini-kms key group,
+so no private signing key sits in plaintext on disk — the family secures its own token plane. The
+default plaintext-`0600` path remains so the educational quickstart still runs without mini-kms. The
+mechanics, the bootstrap ordering, and the failure modes are documented under
+[Wrapping the signing keys under mini-kms](#wrapping-the-signing-keys-under-mini-kms).
 
 **Future tracks (explicitly not scheduled):**
 

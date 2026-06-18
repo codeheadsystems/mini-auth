@@ -192,6 +192,14 @@ services/mini-kms/client/build/install/client/bin/kms-admin --tcp 127.0.0.1:9123
 - **`client`** — `KmsClient` library plus two CLIs (`ClientMain` = data plane, `KeyringAdminMain` =
   control plane); depends on `core`. The `client` build registers a second launcher (`kms-admin`)
   in the same distribution — preserve that when touching its build file.
+- **`client/KmsSigningKeyStore`** — the **recursive integration**: a `DocumentStore<SigningKeys>`
+  (mini-token's key-at-rest SPI) that envelope-wraps each Ed25519 signing key under a mini-kms key
+  group via `KmsClient.encrypt`/`decrypt` (and `reEncrypt` for KEK rotation), so the auth services'
+  signing keys never sit plaintext on disk. It lives here (not in mini-token) to keep the dependency
+  acyclic — `client` gained a `mini-token` dependency; mini-token knows nothing of mini-kms. mini-idp
+  and mini-oidc opt in via `--kms-tcp`/`--kms-key-group`. Note the **leaf-name jar fix**: both
+  `mini-kms:core` and `mini-idp:core` set a unique `base.archivesName`, because a service bundling
+  both would otherwise collide on `core.jar`.
 
 - **Two planes, two tokens.** Every `RequestType` is tagged `DATA` or `CONTROL` (`RequestPlane`).
   `KmsRequestHandler` (in `core`) routes by plane and validates the matching token — the **API
@@ -272,10 +280,10 @@ services/mini-idp/server/build/install/server/bin/server --port 8455 --data-dir 
   in mini-idp — are hashed with Argon2id (`secret/Argon2SecretHasher`), verified in constant time.
 - **Persistence & rotation.** All state is JSON via mini-idp's `store/JsonStore` (atomic temp-file +
   `ATOMIC_MOVE` + `0600`), passed to the token services through the `DocumentStore` SPI. Private
-  signing keys in `signing-keys.json` (`0600`); the marker in mini-token's `model/SigningKeyRecord`
-  notes a real deployment would wrap them under a KMS (the eventual mini-kms integration). Rotation
-  (mini-token's `service/SigningKeyService`) keeps retired keys in the JWKS (`retiredKeyRetention`,
-  = 2× token TTL) so in-flight tokens still verify.
+  signing keys in `signing-keys.json` (`0600`) by default — or, with `--kms-tcp`/`--kms-key-group`,
+  **envelope-wrapped under mini-kms** so no plaintext key touches disk (the recursive integration;
+  see the mini-kms section and `docs/DIRECTION.md`). Rotation (mini-token's `service/SigningKeyService`)
+  keeps retired keys in the JWKS (`retiredKeyRetention`, = 2× token TTL) so in-flight tokens verify.
 - **Conventions.** `core` stays HTTP-free (composition root is `server/IdpServer`). The token
   endpoint returns one generic `invalid_client` for any auth failure. Admin token via
   `resolveAdminToken`. **The OpenAPI spec is the contract** — `OpenApiContractTest` fails if a

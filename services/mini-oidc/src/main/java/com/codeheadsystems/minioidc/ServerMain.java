@@ -32,6 +32,7 @@ public final class ServerMain {
 
   static final String ENV_ADMIN_TOKEN = "MINIOIDC_ADMIN_TOKEN";
   static final String ENV_DIRECTORY_TOKEN = "MINIOIDC_DIRECTORY_TOKEN";
+  static final String ENV_KMS_API_TOKEN = "MINIOIDC_KMS_API_TOKEN";
 
   private ServerMain() {
   }
@@ -53,13 +54,18 @@ public final class ServerMain {
     final ServerConfig config = ServerConfig.resolve(args, env);
     final String adminToken = resolveToken(env.get(ENV_ADMIN_TOKEN), config.adminTokenFilePath(),
         "no admin token configured: set " + ENV_ADMIN_TOKEN + " or provide --admin-token-file");
+    final String kmsApiToken = config.kmsEnabled()
+        ? resolveToken(env.get(ENV_KMS_API_TOKEN), config.kmsApiTokenFilePath(),
+            "--kms-* is set but no mini-kms API token: set " + ENV_KMS_API_TOKEN
+                + " or provide --kms-api-token-file")
+        : null;
 
     final PasskeyStack passkeys = PasskeyStack.inMemory(
         new RelyingPartyConfig(config.rpId(), config.rpName(), config.rpOrigins()),
         ClockProvider.system());
     final UserDirectory directory = resolveDirectory(config, env);
 
-    final OidcServer server = OidcServer.create(config, adminToken, directory,
+    final OidcServer server = OidcServer.create(config, adminToken, kmsApiToken, directory,
         passkeys.humanAuthenticator(), passkeys.recoveryAuthenticator(), Clock.systemUTC());
 
     final CountDownLatch shutdown = new CountDownLatch(1);

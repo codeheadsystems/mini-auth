@@ -16,9 +16,14 @@ plugins {
 
 dependencies {
     implementation(project(":services:mini-kms:core"))
+    // The recursive integration: KmsSigningKeyStore wraps mini-token's signing keys under mini-kms.
+    // mini-token has no dependency on mini-kms, so this stays acyclic (the adapter lives KMS-side).
+    implementation(project(":libs:mini-token"))
 
     testImplementation(project(":services:mini-kms:core"))
     testImplementation(project(":services:mini-kms:server"))
+    // The KMS-backed signing-key-store test boots a real mini-kms and uses a JSON file delegate.
+    testImplementation(libs.jackson.databind)
     // JUnit 5 (jupiter + launcher) is supplied by the convention plugin.
 }
 

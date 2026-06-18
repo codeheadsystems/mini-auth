@@ -28,6 +28,8 @@ dependencies {
     // Shared family libraries: the token plane and the decision function.
     implementation(project(":libs:mini-token"))
     implementation(project(":libs:mini-policy"))
+    // The mini-kms client + KmsSigningKeyStore: optionally wrap signing keys under mini-kms.
+    implementation(project(":services:mini-kms:client"))
     // Argon2id for confidential-client secret hashing (same pattern as the siblings).
     implementation(libs.bouncycastle)
     // JSON for tokens, stores, DTOs, and (de)serializing pk-auth's ceremony DTOs.
@@ -40,6 +42,9 @@ dependencies {
     // and the test classpath also uses the testkit's FakeAuthenticator to drive a real WebAuthn
     // ceremony without a browser. pk-auth sanctions the testkit on the main classpath for this.
     implementation(libs.pk.auth.testkit)
+    // Boot a real mini-kms in the KMS-backed signing-key test.
+    testImplementation(project(":services:mini-kms:server"))
+    testImplementation(project(":services:mini-kms:core"))
     // JUnit 5 (jupiter + launcher) is supplied by the convention plugin.
 }
 

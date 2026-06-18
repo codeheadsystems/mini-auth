@@ -63,13 +63,18 @@ public final class ServerConfig {
   private final Duration refreshTtl;
   private final Duration codeTtl;
   private final Argon2Settings argonSettings;
+  private final String kmsHost;
+  private final int kmsPort;
+  private final String kmsKeyGroup;
+  private final Path kmsApiTokenFilePath;
 
   ServerConfig(final String host, final int port, final String issuer, final String rpId,
                final String rpName, final Set<String> rpOrigins, final Path dataDir,
                final Path adminTokenFilePath, final String directoryUrl,
                final Path directoryTokenFilePath, final boolean secureCookies, final Duration sessionTtl,
                final Duration accessTtl, final Duration idTtl, final Duration refreshTtl,
-               final Duration codeTtl, final Argon2Settings argonSettings) {
+               final Duration codeTtl, final Argon2Settings argonSettings, final String kmsHost,
+               final int kmsPort, final String kmsKeyGroup, final Path kmsApiTokenFilePath) {
     this.host = host;
     this.port = port;
     this.issuer = issuer;
@@ -87,6 +92,10 @@ public final class ServerConfig {
     this.refreshTtl = refreshTtl;
     this.codeTtl = codeTtl;
     this.argonSettings = argonSettings;
+    this.kmsHost = kmsHost;
+    this.kmsPort = kmsPort;
+    this.kmsKeyGroup = kmsKeyGroup;
+    this.kmsApiTokenFilePath = kmsApiTokenFilePath;
   }
 
   /** Resolve configuration from CLI args and the environment. */
@@ -110,6 +119,9 @@ public final class ServerConfig {
     Integer argonMemory = envInt(env, "MINIOIDC_ARGON_MEMORY_KIB");
     Integer argonIterations = envInt(env, "MINIOIDC_ARGON_ITERATIONS");
     Integer argonParallelism = envInt(env, "MINIOIDC_ARGON_PARALLELISM");
+    String kmsTcp = env.get("MINIOIDC_KMS_TCP");
+    String kmsKeyGroup = env.get("MINIOIDC_KMS_KEY_GROUP");
+    String kmsApiTokenFile = env.get("MINIOIDC_KMS_API_TOKEN_FILE");
 
     for (int i = 0; i < args.length; i++) {
       final String arg = args[i];
@@ -133,6 +145,9 @@ public final class ServerConfig {
         case "--argon-memory-kib" -> argonMemory = Integer.parseInt(requireValue(args, ++i, arg));
         case "--argon-iterations" -> argonIterations = Integer.parseInt(requireValue(args, ++i, arg));
         case "--argon-parallelism" -> argonParallelism = Integer.parseInt(requireValue(args, ++i, arg));
+        case "--kms-tcp" -> kmsTcp = requireValue(args, ++i, arg);
+        case "--kms-key-group" -> kmsKeyGroup = requireValue(args, ++i, arg);
+        case "--kms-api-token-file" -> kmsApiTokenFile = requireValue(args, ++i, arg);
         default -> throw new IllegalArgumentException("unknown argument: " + arg);
       }
     }
@@ -171,7 +186,27 @@ public final class ServerConfig {
         new Argon2Settings(
             argonMemory != null ? argonMemory : Argon2Settings.DEFAULT_MEMORY_KIB,
             argonIterations != null ? argonIterations : Argon2Settings.DEFAULT_ITERATIONS,
-            argonParallelism != null ? argonParallelism : Argon2Settings.DEFAULT_PARALLELISM));
+            argonParallelism != null ? argonParallelism : Argon2Settings.DEFAULT_PARALLELISM),
+        kmsTcp == null ? null : hostOf(kmsTcp),
+        kmsTcp == null ? 0 : portOf(kmsTcp),
+        kmsKeyGroup,
+        kmsApiTokenFile != null ? Paths.get(kmsApiTokenFile) : null);
+  }
+
+  private static String hostOf(final String hostPort) {
+    final int colon = hostPort.lastIndexOf(':');
+    if (colon <= 0) {
+      throw new IllegalArgumentException("--kms-tcp must be HOST:PORT");
+    }
+    return hostPort.substring(0, colon);
+  }
+
+  private static int portOf(final String hostPort) {
+    final int colon = hostPort.lastIndexOf(':');
+    if (colon <= 0) {
+      throw new IllegalArgumentException("--kms-tcp must be HOST:PORT");
+    }
+    return Integer.parseInt(hostPort.substring(colon + 1));
   }
 
   private static int positiveOr(final Integer value, final int fallback) {
@@ -282,5 +317,27 @@ public final class ServerConfig {
 
   public Argon2Settings argonSettings() {
     return argonSettings;
+  }
+
+  /** @return whether to wrap signing keys under mini-kms (both {@code --kms-tcp} and a key group set). */
+  public boolean kmsEnabled() {
+    return kmsHost != null && !kmsHost.isBlank() && kmsKeyGroup != null && !kmsKeyGroup.isBlank();
+  }
+
+  public String kmsHost() {
+    return kmsHost;
+  }
+
+  public int kmsPort() {
+    return kmsPort;
+  }
+
+  public String kmsKeyGroup() {
+    return kmsKeyGroup;
+  }
+
+  /** @return the file holding the mini-kms data-plane API token, or null (env is then required). */
+  public Path kmsApiTokenFilePath() {
+    return kmsApiTokenFilePath;
   }
 }

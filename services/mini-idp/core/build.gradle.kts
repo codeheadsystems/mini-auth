@@ -14,6 +14,10 @@ plugins {
     id("miniauth.library-conventions")
 }
 
+// Unique jar name so this `core` and mini-kms's `core` (both `core.jar` by default) can coexist in
+// one service distribution — mini-idp:server now bundles mini-kms:core for the KMS key wrapping.
+base { archivesName = "mini-idp-core" }
+
 dependencies {
     // The shared token plane (JWS/JWKS/rotation/revocation/audit + the auth model and store SPI).
     // `api` so the server module sees mini-token's types transitively, as it did when they lived here.

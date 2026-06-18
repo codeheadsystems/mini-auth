@@ -10,6 +10,12 @@ plugins {
     id("miniauth.library-conventions")
 }
 
+// Leaf module names repeat across the family (`:services:mini-kms:core`, `:services:mini-idp:core`),
+// so the default jar name (`core.jar`) collides when one service's distribution bundles both. Give
+// each a unique archive name — now that mini-idp/mini-oidc pull in mini-kms:core (transitively via the
+// KMS client) for the recursive integration, both `core` jars can land in one distribution.
+base { archivesName = "mini-kms-core" }
+
 dependencies {
     // Argon2id KDF + a reliable crypto provider.
     api(libs.bouncycastle)
