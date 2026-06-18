@@ -1,0 +1,237 @@
+openapi: 3.1.0
+info:
+  title: mini-ca
+  version: "1.0.0"
+  description: |
+    **mini-ca** is a small internal certificate authority for the homelab: it issues and renews
+    short-lived X.509 leaf certificates (for mTLS between the minis and for homelab services) from
+    PKCS#10 CSRs, keeps an issuance log + a revocation list, and protects its own CA private key by
+    wrapping it under **mini-kms** (or plaintext-`0600` by default).
+
+    Educational, **not a full PKI**. Scope: one self-signed root (no intermediates), EC P-256 +
+    SHA256withECDSA, server-side issuance from a CSR (the requester keeps its own key), a JSON
+    revocation list (not a signed DER CRL), loopback + admin-token guarded. See the README for the
+    full list of non-goals.
+
+    The CA root certificate (`GET /ca`) and the revocation list (`GET /revocations`) are public — a
+    verifier needs both. Issuance, renewal, revocation, and the log require the admin bearer token.
+servers:
+  - url: http://127.0.0.1:8499
+    description: Default loopback bind address.
+
+tags:
+  - name: ca
+    description: The trust anchor and revocation list (public).
+  - name: certs
+    description: Issuance, renewal, and revocation (admin).
+  - name: meta
+    description: Health and the served specification.
+
+paths:
+  /health:
+    get:
+      tags: [meta]
+      summary: Liveness check
+      responses:
+        "200": { description: The service is up. }
+
+  /ca:
+    get:
+      tags: [ca]
+      summary: The CA root certificate (PEM)
+      description: The public trust anchor verifiers use to validate issued leaves.
+      responses:
+        "200":
+          description: The CA certificate, PEM.
+          content:
+            application/x-pem-file:
+              schema: { type: string }
+
+  /revocations:
+    get:
+      tags: [ca]
+      summary: The revocation list
+      description: The currently-revoked serials, for a verifier to poll.
+      responses:
+        "200":
+          description: The revocation list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Revocation" }
+
+  /issue:
+    post:
+      tags: [certs]
+      summary: Issue a leaf certificate from a CSR
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IssueRequest" }
+      responses:
+        "201":
+          description: The issued certificate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /renew:
+    post:
+      tags: [certs]
+      summary: Renew (issue a fresh leaf, optionally revoking the prior serial)
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RenewRequest" }
+      responses:
+        "201":
+          description: The renewed certificate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /revoke:
+    post:
+      tags: [certs]
+      summary: Revoke a certificate by serial
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RevokeRequest" }
+      responses:
+        "200": { description: Revoked (idempotent). }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /log:
+    get:
+      tags: [certs]
+      summary: The issuance log
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: Issued certificates, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/IssuedCertificate" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /openapi.yaml:
+    get:
+      tags: [meta]
+      summary: This specification, as YAML
+      responses:
+        "200": { description: The OpenAPI document (YAML). }
+
+  /openapi.json:
+    get:
+      tags: [meta]
+      summary: This specification, as JSON
+      responses:
+        "200": { description: The OpenAPI document (JSON). }
+
+  /docs:
+    get:
+      tags: [meta]
+      summary: Swagger UI
+      responses:
+        "200": { description: HTML page. }
+
+components:
+  securitySchemes:
+    adminBearer:
+      type: http
+      scheme: bearer
+      description: "The bootstrap admin token, presented as `Authorization: Bearer <token>`."
+
+  responses:
+    BadRequest:
+      description: Invalid request (e.g. a malformed CSR — one generic error, no oracle).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid admin token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        error_description: { type: string }
+      required: [error]
+
+    IssueRequest:
+      type: object
+      properties:
+        csr: { type: string, description: PKCS#10 certificate signing request, PEM. }
+        ttlSeconds: { type: integer, description: Requested leaf lifetime (optional; clamped to the max). }
+        sans:
+          type: array
+          description: Subject alternative names (DNS names or IPv4 addresses).
+          items: { type: string }
+      required: [csr]
+
+    RenewRequest:
+      type: object
+      properties:
+        csr: { type: string, description: PKCS#10 CSR, PEM. }
+        ttlSeconds: { type: integer }
+        sans:
+          type: array
+          items: { type: string }
+        previousSerial:
+          type: string
+          description: The serial of the cert being replaced; revoked on success.
+      required: [csr]
+
+    RevokeRequest:
+      type: object
+      properties:
+        serial: { type: string, description: The certificate serial (lowercase hex). }
+        reason: { type: string }
+      required: [serial]
+
+    IssueResponse:
+      type: object
+      properties:
+        serial: { type: string, description: The issued serial (lowercase hex) — the revocation handle. }
+        certificate: { type: string, description: The issued leaf certificate, PEM. }
+        caCertificate: { type: string, description: The CA root certificate, PEM (trust anchor). }
+        notAfter: { type: integer, description: Leaf expiry (epoch seconds). }
+      required: [serial, certificate, caCertificate, notAfter]
+
+    IssuedCertificate:
+      type: object
+      properties:
+        serial: { type: string }
+        subject: { type: string }
+        notBefore: { type: integer, description: Epoch seconds. }
+        notAfter: { type: integer, description: Epoch seconds. }
+        issuedAt: { type: integer, description: Epoch seconds. }
+        renewedFromSerial: { type: string }
+      required: [serial, subject, notBefore, notAfter, issuedAt]
+
+    Revocation:
+      type: object
+      properties:
+        serial: { type: string }
+        revokedAt: { type: integer, description: Epoch seconds. }
+        reason: { type: string }
+      required: [serial, revokedAt]

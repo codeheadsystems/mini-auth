@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this
 repository. It is the **single** guide for the whole `mini-` family: the umbrella conventions
 first, then a folded-in section per shipping service (mini-kms, mini-idp, mini-directory, mini-oidc,
-mini-gateway). There are no per-module `CLAUDE.md` files — this is it.
+mini-gateway, mini-ca). There are no per-module `CLAUDE.md` files — this is it.
 
 > **Read first.** `docs/DIRECTION.md` is the canonical map of the family — the vision, the
 > component catalog, the architecture, the runtime relationships, the roadmap, and the
@@ -101,7 +101,7 @@ mini-auth/
 │   ├── mini-oidc/                           (shipping; human SSO / OpenID Provider, embeds pk-auth)
 │   ├── mini-gateway/                        (shipping; forward-auth for a reverse proxy)
 │   ├── mini-directory/                      (shipping; identity source of truth, standalone)
-│   ├── mini-ca/                             (roadmap placeholder)
+│   ├── mini-ca/                             (shipping; internal CA, CA key wrapped under mini-kms)
 │   └── mini-console/                        (roadmap placeholder)
 └── libs/                        # shared libraries (no transport)
     ├── mini-token/                          (shipping; token plane + shared SSO session store)
@@ -115,7 +115,7 @@ mini-auth/
 | mini-oidc | `:services:mini-oidc` | service (application) | **shipping** (§ below) — embeds pk-auth |
 | mini-gateway | `:services:mini-gateway` | service (application) | **shipping** (§ below) |
 | mini-directory | `:services:mini-directory` | service (application) | **shipping** (§ below) |
-| mini-ca | `:services:mini-ca` | service (future) | roadmap placeholder (no logic) |
+| mini-ca | `:services:mini-ca` | service (application) | **shipping** (§ below) |
 | mini-console | `:services:mini-console` | service (future) | roadmap placeholder (no logic) |
 | mini-token | `:libs:mini-token` | library | **shipping** (token plane extracted from mini-idp) |
 | mini-policy | `:libs:mini-policy` | library | scaffold |
@@ -458,3 +458,47 @@ services/mini-gateway/build/install/mini-gateway/bin/mini-gateway \
 - **Docs.** `services/mini-gateway/README.md` — the decision flow, the routes config, and runnable
   Traefik / Caddy / nginx snippets; `services/mini-gateway/examples/` — `routes.json`, a Traefik
   `docker-compose`, and a `Caddyfile` that gate a no-auth `whoami` behind a mini-oidc login.
+
+---
+
+# Service: mini-ca (`services/mini-ca`)
+
+mini-ca is a small **internal certificate authority** for the homelab: it issues and renews
+short-lived X.509 leaf certs (mTLS between the minis + homelab services) from PKCS#10 CSRs, keeps an
+issuance log + revocation list, and **wraps its own CA private key under mini-kms** (the recursive
+integration). **Shipping**, and deliberately **not a full PKI** — see the README's non-goals (one
+self-signed root, JSON revocation list rather than a signed DER CRL, no intermediates/ACME/OCSP).
+
+**Run it.** Loopback by default; admin token from env/file (never argv, never logged).
+
+```bash
+export MINICA_ADMIN_TOKEN="$(openssl rand -hex 32)"
+./gradlew :services:mini-ca:installDist
+services/mini-ca/build/install/mini-ca/bin/mini-ca --port 8499 --data-dir ~/.mini-ca \
+  --kms-tcp 127.0.0.1:9123 --kms-key-group ca-key   # --kms-* optional (else plaintext 0600)
+```
+
+**Architecture.** One application module under base package `com.codeheadsystems.minica`:
+
+- **`ca`** — the crypto: `CaKeys` (EC P-256 keygen + self-signed root via BouncyCastle PKIX),
+  `CertificateAuthority` (issues an mTLS leaf from a CSR — verifies proof-of-possession, sets the
+  extension set, random serial, short TTL), and hand-rolled `Pem`.
+- **`service/CaService`** — bootstraps (mint a fresh CA on first run, else load), issues/renews/
+  revokes, and maintains the issuance log + revocation list. The **CA private key is persisted as a
+  one-record mini-token `SigningKeys` document** through the injected `DocumentStore` — so it reuses
+  `KmsSigningKeyStore` (KMS-wrapped) or a plaintext `JsonStore`, exactly like the token signing keys.
+  The root cert / log / revocations are plaintext (public).
+- **`server`** — `ServerMain`/`CaServer` (composition root), `ServerConfig`, `ApiHandlers`,
+  `AdminAuthenticator`, the reused `http/` router + `store/JsonStore`, and the OpenAPI/Swagger
+  serving.
+
+- **CA key under mini-kms.** Reuses Prompt 6's `KmsSigningKeyStore` verbatim (the CA key is just a
+  PKCS#8 in a `SigningKeys` record); with `--kms-*` set, `ca-key.json` holds only a `kms1:` envelope,
+  unwrapped in memory at bootstrap. Bootstrap ordering / failure modes are the token-key ones in
+  `docs/DIRECTION.md`.
+- **Conventions.** `/ca` (trust anchor) + `/revocations` + `/health` are public; issuance/renewal/
+  revocation/log are admin-guarded. EC P-256 / `SHA256withECDSA`; short leaf TTLs (clamped); CSR
+  PoP verified (the CA never sees a requester's private key); one generic `400` for a bad CSR (no
+  oracle); no secrets logged; loopback bind.
+- **Docs.** `services/mini-ca/README.md` — scope, the explicit non-goals, the endpoint list, and the
+  mini-kms key-wrapping wiring.

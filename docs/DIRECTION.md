@@ -67,7 +67,7 @@ Every mini, its one-line purpose, whether it is a library or a service, and its 
 | **mini-gateway** | Forward-auth endpoint for a reverse proxy (Traefik / Caddy / nginx `auth_request`) to gate apps with no native auth: validates the shared mini-oidc SSO session or a bearer token, decides per-route via mini-policy, returns allow / 401 / 403 / redirect-to-login. | service | **shipping** |
 | **mini-directory** | The single identity source of truth: humans, groups, roles, service accounts, and their grant mappings; resolves any account to a mini-policy `Principal` + expanded grants. | service | **shipping** (standalone; issuers not yet wired to read from it) |
 | **pk-auth** | Passkeys-first auth library set, published on Maven Central under `com.codeheadsystems`. Consumed as a normal dependency — **not vendored**. | external library | **shipping (external)** |
-| **mini-ca** | Small internal certificate authority for mTLS between the minis and workload identity in the homelab. | service (future) | **roadmap** (placeholder module) |
+| **mini-ca** | Small internal certificate authority for mTLS between the minis and workload identity in the homelab. Issues/renews short-lived leaves from CSRs; its CA key is wrapped under mini-kms. | service (application) | **shipping** |
 | **mini-console** | Optional unified admin UI over the family. | service (future) | **roadmap** (placeholder module) |
 
 "Scaffolded" means: a correct module that **compiles and passes a trivial test**, with the real
@@ -371,10 +371,15 @@ default plaintext-`0600` path remains so the educational quickstart still runs w
 mechanics, the bootstrap ordering, and the failure modes are documented under
 [Wrapping the signing keys under mini-kms](#wrapping-the-signing-keys-under-mini-kms).
 
+**mini-ca now ships.** The internal certificate authority for mTLS between the minis and homelab
+workload identity issues and renews short-lived leaf certs from PKCS#10 CSRs, keeps an issuance log
+and a JSON revocation list, and **wraps its own CA private key under mini-kms** (the same
+`KmsSigningKeyStore` the token plane uses) — the recursive integration applied a second time. It is
+deliberately not a full PKI (one self-signed root, no intermediates, no signed DER CRL / OCSP, no
+ACME); see `services/mini-ca/README.md` for the scope and non-goals.
+
 **Future tracks (explicitly not scheduled):**
 
-- **mini-ca** — an internal certificate authority for mTLS between the minis and for workload
-  identity in the homelab. A placeholder module exists; no logic yet.
 - **mini-console** — an optional unified admin UI over the family (directory, key rotation, audit,
   KMS key groups). A placeholder module exists; no logic yet.
 
@@ -390,7 +395,7 @@ directory, so `settings.gradle.kts` includes them as:
 include("services:mini-kms:core"); include("services:mini-kms:server"); include("services:mini-kms:client")
 include("services:mini-idp:core"); include("services:mini-idp:server")
 include("services:mini-oidc"); include("services:mini-gateway"); include("services:mini-directory")
-include("services:mini-ca"); include("services:mini-console")      // roadmap placeholders
+include("services:mini-ca"); include("services:mini-console")      // mini-ca ships; mini-console is a roadmap placeholder
 include("libs:mini-token"); include("libs:mini-policy")
 ```
 
