@@ -15,6 +15,14 @@ import java.util.Optional;
  *
  * <p>This is the API-client path: a service calling a gated upstream presents
  * {@code Authorization: Bearer <access token>} instead of a browser SSO cookie.
+ *
+ * <p><b>Revocation is not consulted on this path.</b> A bearer access token is accepted until it
+ * expires; the gateway holds no revocation denylist and {@link JwsClaimsVerifier} takes no
+ * {@code isRevoked} hook. This is acceptable precisely because OP access tokens are short-lived —
+ * the TTL is the revocation bound — and mini-oidc's revocation acts on the longer-lived refresh
+ * tokens (which the gateway never sees), not on access tokens. Operators who need tighter bearer
+ * revocation must shorten the access-token TTL; wiring a polled denylist into the verifier is a
+ * documented future option, not current behavior.
  */
 public final class BearerAuthenticator {
 

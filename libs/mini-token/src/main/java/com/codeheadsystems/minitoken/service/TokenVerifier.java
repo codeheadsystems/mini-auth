@@ -22,6 +22,11 @@ import java.util.function.Predicate;
  * registered claims. Each failure maps to a {@link FailureReason} so callers can react, but a
  * production token endpoint should surface only a single generic error to clients — never echo the
  * specific reason back (no oracle).
+ *
+ * <p><b>Audience scope:</b> this verifier treats {@code aud} as a single string (mini-idp tokens
+ * carry one audience). A consumer that must accept array-valued audiences (e.g. some OIDC tokens)
+ * should use {@link com.codeheadsystems.minitoken.token.JwsClaimsVerifier}, which handles {@code aud}
+ * as a string-or-array per RFC 7519.
  */
 public final class TokenVerifier {
 

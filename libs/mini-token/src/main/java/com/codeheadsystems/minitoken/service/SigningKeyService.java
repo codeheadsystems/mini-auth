@@ -45,6 +45,13 @@ public final class SigningKeyService {
    */
   public SigningKeyService(final DocumentStore<SigningKeys> store, final RandomIds ids,
                            final Clock clock, final Duration retiredKeyRetention) {
+    if (retiredKeyRetention == null || retiredKeyRetention.isNegative() || retiredKeyRetention.isZero()) {
+      // The full invariant — retention MUST exceed the max token TTL, or a token signed just before
+      // a rotation can outlive its kid in the JWKS and fail verification — is a numeric relationship
+      // the caller must uphold (this service does not know the issuer's TTL). We at least refuse a
+      // non-positive retention, which would drop a freshly retired key immediately.
+      throw new IllegalArgumentException("retiredKeyRetention must be positive and exceed the max token TTL");
+    }
     this.store = store;
     this.ids = ids;
     this.clock = clock;

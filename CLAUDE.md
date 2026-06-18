@@ -154,7 +154,11 @@ mini-auth/
 - **The token-claim contract aligns across the family.** mini-idp's `grants` claim maps onto
   mini-kms's authorization model (`sub → Principal.id`, `grants.control → Principal.admin`,
   `grants.groups[] → KeyAuthorizationPolicy`); `auth/KeyOperation` string values are the contract —
-  don't rename them. Preserve this mapping in mini-token / mini-policy work.
+  don't rename them. Preserve this mapping in mini-token / mini-policy work. **Note this is a
+  *designed* contract, not a wired runtime path:** `KmsRequestHandler` still authenticates with a
+  shared per-plane token + fixed principals and ships `AllowAllPolicy` — it does not yet parse a JWT
+  or consume `grants` (`GrantsClaim.toAuthorization()` has no production caller). The token → mini-kms
+  authorization step is a future seam; see DIRECTION.md's "Wired vs. designed" note.
 - **Don't duplicate foundation code.** Argon2 hashing, the atomic-`0600` JSON store, base64url,
   constant-time compare, and the `ServerConfig` env/file token pattern exist in *both* shipping
   services today. They are catalogued as **`mini-common` extraction candidates** in

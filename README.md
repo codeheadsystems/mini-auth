@@ -11,7 +11,12 @@ mini-auth is two things:
    the whole family is standardized on one toolchain and **Jackson 3.x**.
 2. **The canonical direction doc** — **[docs/DIRECTION.md](docs/DIRECTION.md)** is the shared map
    of the family: the vision, the catalog, the architecture, the recursive integrations, the open
-   design questions, and the roadmap. **Read it first.**
+   design questions, and the roadmap — the full architecture reference.
+
+> 🧭 **New here? Start with [docs/LEARNING.md](docs/LEARNING.md)** — a guided reading order that
+> walks the family in dependency order, naming the concept each stop teaches, and keep
+> **[docs/GLOSSARY.md](docs/GLOSSARY.md)** open for the crypto / OAuth / OIDC vocabulary. Read
+> [docs/DIRECTION.md](docs/DIRECTION.md) once you want the whole architecture map.
 
 > ⚠️ **Educational project.** The family uses real, sound cryptographic constructions but is **not
 > audited** and is not a substitute for production identity infrastructure. Six services and both

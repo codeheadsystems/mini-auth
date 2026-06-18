@@ -51,7 +51,11 @@ This is the teaching version of a CA, not a production PKI. Deliberately out of 
 - **No intermediates / chain depth** — a single self-signed root signs leaves directly (`pathLen 0`).
 - **No signed DER CRL and no OCSP** — revocation is a **JSON list of serials**; a real verifier
   would consume a signed CRL or OCSP. (The list is the seam where those would plug in.)
-- **No policy / name constraints / templated profiles** — every leaf gets the same mTLS extension set.
+- **No policy / name constraints / templated profiles** — every leaf gets the same mTLS extension
+  set, and the Subject DN and SANs come straight from the request. Any holder of the issuance admin
+  token can therefore mint a cert for **any** name — mTLS *identity* is only as strong as control of
+  that single token. This is an explicit, accepted single-operator trust boundary; see
+  [`docs/security/02-issuance-authority.md`](docs/security/02-issuance-authority.md).
 - **No automatic renewal / ACME** — clients re-submit a CSR; there is no challenge protocol.
 - **No HSM, no key ceremony, no offline root** — the root is online; its key is protected only by
   mini-kms wrapping (or `0600`).
@@ -319,6 +323,11 @@ mini-kms dependency.
 - **EC P-256 / `SHA256withECDSA`**; leaves are short-lived (default 1 day, capped at 7) — short TTLs
   are the primary control, with revocation as the kill switch.
 - **CSR proof-of-possession** is verified; the CA never sees a requester's private key.
+- **Issuance authority is the trust boundary.** The Subject DN and SANs come straight from the
+  request, with no per-caller name constraints — so any holder of the issuance admin token can mint
+  a cert for any name; mTLS *identity* is only as strong as control of that token. An explicit,
+  accepted single-operator boundary — see [`docs/security/`](docs/security/), which walks this and
+  the CSR proof-of-possession in the mini-kms finding format.
 - **No oracle**: any malformed/invalid CSR collapses to one generic `400`; admin-auth failures to
   `401`. **No secrets in logs** (no private keys, no admin token).
 - **Loopback bind by default**; the CA issues the certs that secure the LAN and must not itself be

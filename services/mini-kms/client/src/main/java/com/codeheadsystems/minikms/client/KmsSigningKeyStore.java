@@ -28,9 +28,14 @@ import java.util.function.Supplier;
  *       group, using mini-kms's ReEncrypt.</li>
  * </ul>
  *
- * <p>The {@code kid} is bound in as the encryption context (AAD), so a wrapped key cannot be swapped
- * between records. Fields without the {@code "kms1:"} tag are passed through untouched, so a store
- * that already holds plaintext keys (the default path) can be read and transparently migrated.
+ * <p>The {@code kid} is bound in as the encryption context (AAD): decryption only succeeds when the
+ * same {@code kid} is supplied, so a wrapped key cannot be swapped between records. <b>Why that
+ * matters:</b> without the binding, anyone able to write the store could splice the (still-encrypted)
+ * active key into a retired key's slot, or swap two records — mini-kms would happily unwrap each in
+ * its new position, and the JWKS/rotation bookkeeping would then map a {@code kid} to the wrong key.
+ * Binding the {@code kid} makes such a splice fail to decrypt instead. Fields without the {@code
+ * "kms1:"} tag are passed through untouched, so a store that already holds plaintext keys (the default
+ * path) can be read and transparently migrated.
  * Connections are opened per operation through the supplied factory; mini-kms calls use the
  * <b>data-plane API token</b> (the key group must be created out of band — see {@code docs/DIRECTION.md}).
  */

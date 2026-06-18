@@ -174,8 +174,13 @@ public final class LocalKeyring implements MasterKeyProvider, KeyringManager {
     if (version == null || !version.status.canEncrypt() || version.kek == null) {
       throw new KeyUnavailableException("no active key version for group " + groupId);
     }
-    final byte[] inner = aesGcm.encrypt(AesGcm.toKey(version.kek), plaintext, aad);
-    return new KekEnvelope(new KekId(groupId, group.activeVersion), inner).serialize();
+    final KekId kekId = new KekId(groupId, group.activeVersion);
+    // Bind the kek_id (group + version) into the AEAD's AAD — not just the plaintext routing header —
+    // so "which key wrapped me" is cryptographically authenticated. A tampered or spliced header then
+    // fails the GCM tag rather than silently selecting a different key (defense-in-depth for the day
+    // a real per-group PolicyEngine replaces AllowAllPolicy).
+    final byte[] inner = aesGcm.encrypt(AesGcm.toKey(version.kek), plaintext, bindAad(kekId, aad));
+    return new KekEnvelope(kekId, inner).serialize();
   }
 
   @Override
@@ -189,12 +194,30 @@ public final class LocalKeyring implements MasterKeyProvider, KeyringManager {
       // Disabled/destroyed/unknown: do not reveal which; treat as a decryption failure.
       throw new KeyUnavailableException("key " + kekId + " is unavailable for decryption");
     }
-    return aesGcm.decrypt(AesGcm.toKey(version.kek), envelope.innerEnvelope(), aad);
+    return aesGcm.decrypt(AesGcm.toKey(version.kek), envelope.innerEnvelope(), bindAad(kekId, aad));
   }
 
   @Override
   public KekId keyIdOf(final byte[] blob) {
     return parseEnvelope(blob).kekId();
+  }
+
+  /**
+   * Build the AEAD AAD that binds a ciphertext to the exact KEK that wrapped it: a domain-tagged,
+   * length-prefixed encoding of the {@link KekId} (group + version) followed by the caller's own
+   * AAD. Reconstructed identically on decrypt from the (untrusted) envelope header — so tampering
+   * with the header makes the GCM tag fail instead of silently routing to a different key.
+   */
+  private static byte[] bindAad(final KekId kekId, final byte[] callerAad) {
+    final byte[] groupId = kekId.keyGroupId().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    final byte[] extra = callerAad == null ? new byte[0] : callerAad;
+    return java.nio.ByteBuffer.allocate(4 + 4 + groupId.length + 8 + extra.length)
+        .put(new byte[] {'k', 'e', 'k', '1'})
+        .putInt(groupId.length)
+        .put(groupId)
+        .putLong(kekId.version())
+        .put(extra)
+        .array();
   }
 
   // ----------------------------------------------------------------------------------

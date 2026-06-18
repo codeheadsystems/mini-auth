@@ -12,9 +12,11 @@ import java.util.List;
  * ({@code @pk-auth/passkeys-browser}) instead, which handles the base64url ↔ ArrayBuffer plumbing
  * robustly. A backup-code recovery form is offered alongside as the fallback login path.
  *
- * <p>All dynamic values are HTML-escaped. {@code requestId}/{@code csrf} are opaque base64url
- * tokens; {@code clientName}/{@code scope} come from the (operator-registered) client and are
- * escaped defensively regardless.
+ * <p>Dynamic values are escaped per context: HTML-escaped in element/attribute positions, and
+ * JSON-encoded (via {@link #jsString}) where they are emitted into the inline script's string
+ * literals — HTML-entity escaping is the wrong tool inside {@code <script>} and would not stop a
+ * breakout. {@code requestId}/{@code csrf} are opaque base64url tokens and {@code clientName}/{@code
+ * scope} come from the (operator-registered) client, but both are escaped defensively regardless.
  */
 public final class LoginPages {
 
@@ -53,7 +55,7 @@ public final class LoginPages {
           e.preventDefault();
           const username = document.getElementById('username').value;
           const started = await (await fetch('/login/passkey/start', {method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({requestId:'$RID', username})})).json();
+            body: JSON.stringify({requestId:$RIDJS, username})})).json();
           const pk = started.publicKey;
           pk.challenge = b64uToBuf(pk.challenge);
           (pk.allowCredentials||[]).forEach(c => c.id = b64uToBuf(c.id));
@@ -64,13 +66,17 @@ public final class LoginPages {
             signature: bufToB64u(cred.response.signature),
             userHandle: cred.response.userHandle ? bufToB64u(cred.response.userHandle) : null}};
           const res = await fetch('/login/passkey/finish', {method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({requestId:'$RID', csrf:'$CSRF', challengeId: started.challengeId, assertion})});
+            body: JSON.stringify({requestId:$RIDJS, csrf:$CSRFJS, challengeId: started.challengeId, assertion})});
           if (res.ok) { window.location = (await res.json()).next; }
           else { document.getElementById('error').textContent = 'Sign-in failed.'; }
           return false;
         }
         </script></body></html>
-        """.replace("$RID", rid).replace("$CSRF", tok);
+        """
+        // JS-context placeholders first (they contain "$RID"/"$CSRF" as a prefix), then the
+        // HTML-attribute ones — so the attribute replace does not corrupt the script literals.
+        .replace("$RIDJS", jsString(requestId)).replace("$CSRFJS", jsString(csrf))
+        .replace("$RID", rid).replace("$CSRF", tok);
   }
 
   /** The consent page for a pending authorization, listing the scopes that would be granted. */
@@ -106,5 +112,37 @@ public final class LoginPages {
     }
     return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         .replace("\"", "&quot;").replace("'", "&#39;");
+  }
+
+  /**
+   * Encode a value as a JSON/JS string literal (with surrounding quotes) for safe inclusion inside
+   * the inline {@code <script>}. Escapes the quote/backslash and, defensively, {@code < > &} (so a
+   * value can never spell {@code </script>} or otherwise break out of the script element).
+   */
+  private static String jsString(final String value) {
+    if (value == null) {
+      return "\"\"";
+    }
+    final StringBuilder out = new StringBuilder("\"");
+    for (int i = 0; i < value.length(); i++) {
+      final char c = value.charAt(i);
+      switch (c) {
+        case '"' -> out.append("\\\"");
+        case '\\' -> out.append("\\\\");
+        case '<' -> out.append("\\u003c");
+        case '>' -> out.append("\\u003e");
+        case '&' -> out.append("\\u0026");
+        case '\n' -> out.append("\\n");
+        case '\r' -> out.append("\\r");
+        default -> {
+          if (c < 0x20) {
+            out.append(String.format("\\u%04x", (int) c));
+          } else {
+            out.append(c);
+          }
+        }
+      }
+    }
+    return out.append('"').toString();
   }
 }

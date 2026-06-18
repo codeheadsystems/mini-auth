@@ -11,8 +11,9 @@ token toward per-client identities. mini-idp does not depend on mini-kms; it mir
 conventions and issues tokens whose authorization claim maps cleanly onto mini-kms's identity
 model, so the KMS can later turn a verified token into a `Principal` with grants.
 
-> **Not for production.** Private signing keys are stored locally (0600); a real deployment would
-> wrap them under a KMS — which is the eventual recursive integration with mini-kms.
+> **Not for production.** Real but un-audited crypto, single-machine, loopback by default. Private
+> signing keys are stored locally (`0600`) — or, with `--kms-tcp`/`--kms-key-group`, envelope-wrapped
+> under mini-kms (the recursive integration) so no plaintext key touches disk.
 
 ## Table of contents
 
@@ -138,7 +139,8 @@ grants.groups[] -> per-key-group KeyAuthorizationPolicy decisions
 4. (Optional) Poll `GET /admin/revocations` and reject any token whose `jti` is listed. Short TTLs
    are the primary control; revocation kills a specific token early.
 
-`core`'s `TokenVerifier` is a complete reference implementation of these steps.
+mini-token's `TokenVerifier` (`com.codeheadsystems.minitoken.service.TokenVerifier`) is a complete
+reference implementation of these steps.
 
 ## Endpoints
 
@@ -214,6 +216,28 @@ issue:            client creds --(verify @ mini-directory)--> subject + grants -
 verify (offline): access_token --kid--> JWK --EdDSA verify--> claims --map--> Principal + grants
 ```
 
+### How issuance works (step by step)
+
+`POST /oauth/token` (the client-credentials grant), traced through the code:
+
+1. **Parse + grant check** — `server/ApiHandlers.token` (`ApiHandlers.java:92`) reads the form and
+   rejects anything but `grant_type=client_credentials`. Credentials arrive as `client_secret_post`
+   form fields or HTTP Basic.
+2. **Authenticate the client** — `directory.authenticate(clientId, secret)` (`ApiHandlers.java:110`)
+   resolves the service account over the `ServiceAccountDirectory` SPI: in production
+   `HttpServiceAccountDirectory` POSTs to mini-directory's `/admin/service-accounts/authenticate`,
+   so the secret is verified *there* (constant-time) and never leaves the directory. Any failure
+   collapses to one generic `invalid_client` (`ApiHandlers.java:115`) — no oracle — and the secret
+   `char[]` is zeroed in a `finally`.
+3. **Mint the token** — `tokenIssuer.issue(subject, authorization)` (`ApiHandlers.java:117` →
+   mini-token `service/TokenIssuer.issue`, `TokenIssuer.java:66`) builds the `JwtClaims`, folds the
+   grants into the `grants` claim (`GrantsClaim.from`), stamps `iat`/`nbf`/`exp` and a random `jti`,
+   and signs with the active key — `Jws.sign(JwsHeader.forKid(kid), claims, privateKey)`
+   (`TokenIssuer.java:83`); the header carries the `kid` for rotation.
+4. **Audit + respond** — the issuance is recorded by `jti` (`ApiHandlers.java:118`) and the compact
+   JWS is returned as `access_token` with `token_type`, `expires_in`, and a `scope` summary
+   (`ApiHandlers.java:120`).
+
 ## Security notes
 
 - **Ed25519/EdDSA** signatures via the JDK. Client-secret hashing (Argon2id) lives in mini-directory.
@@ -223,8 +247,9 @@ verify (offline): access_token --kid--> JWK --EdDSA verify--> claims --map--> Pr
 - **No secret leakage**: client secrets, private keys, and raw tokens are never logged (a test
   enforces this); access logs carry only method/path/status. The client secret is returned exactly
   once, at registration.
-- **At-rest**: every store file is written atomically and `0600`. Private signing keys are local
-  for now; wrapping them under a KMS is the documented next step.
+- **At-rest**: every store file is written atomically and `0600`. Private signing keys are stored
+  locally by default, or — with `--kms-tcp`/`--kms-key-group` — envelope-wrapped under mini-kms so no
+  plaintext key touches disk (the recursive integration).
 - **Loopback by default**: like mini-kms, this is a local-trust service; exposing it beyond
   loopback (or setting `--issuer` behind a proxy) is an explicit operator decision.
 

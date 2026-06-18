@@ -17,10 +17,14 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class AuthorizationCodeStore {
 
+  // How long a redeemed code is remembered for replay detection. Codes live only minutes, so an
+  // hour is ample to catch an in-flight replay; keeping them forever would leak memory over uptime.
+  private static final long USED_RETENTION_SECONDS = 3600;
+
   private final Clock clock;
   private final Map<String, AuthorizationCode> active = new ConcurrentHashMap<>();
-  // code -> the refresh-token family issued at first redemption (empty string until bound).
-  private final Map<String, String> used = new ConcurrentHashMap<>();
+  // code -> the refresh-token family issued at first redemption (familyId empty until bound).
+  private final Map<String, Used> used = new ConcurrentHashMap<>();
 
   public AuthorizationCodeStore(final Clock clock) {
     this.clock = clock;
@@ -45,7 +49,9 @@ public final class AuthorizationCodeStore {
     if (clock.instant().getEpochSecond() >= record.expiresAt()) {
       return Optional.empty();
     }
-    used.put(code, "");
+    final long now = clock.instant().getEpochSecond();
+    used.put(code, new Used("", now));
+    used.entrySet().removeIf(e -> now - e.getValue().usedAt() > USED_RETENTION_SECONDS);
     return Optional.of(record);
   }
 
@@ -56,14 +62,16 @@ public final class AuthorizationCodeStore {
 
   /** Record the refresh-token family produced when a code was redeemed (for replay revocation). */
   public void bindFamily(final String code, final String familyId) {
-    if (used.containsKey(code)) {
-      used.put(code, familyId);
-    }
+    used.computeIfPresent(code, (k, v) -> new Used(familyId, v.usedAt()));
   }
 
   /** @return the refresh-token family bound to a used code, if any. */
   public Optional<String> familyFor(final String code) {
-    final String family = used.get(code);
-    return family == null || family.isEmpty() ? Optional.empty() : Optional.of(family);
+    final Used family = used.get(code);
+    return family == null || family.familyId().isEmpty() ? Optional.empty() : Optional.of(family.familyId());
+  }
+
+  /** A redeemed code: the refresh-token family it produced (empty until bound) and when it was used. */
+  private record Used(String familyId, long usedAt) {
   }
 }
