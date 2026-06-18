@@ -14,7 +14,7 @@ understand the whole, read this one.
 - [System architecture](#system-architecture)
 - [Runtime relationships (what the names don't show)](#runtime-relationships)
 - [Wrapping the signing keys under mini-kms](#wrapping-the-signing-keys-under-mini-kms)
-- [Open design decision: the client registry](#open-design-decision-the-client-registry)
+- [Resolved design decision: the client registry folded into mini-directory](#resolved-design-decision-the-client-registry-folded-into-mini-directory)
 - [Toward a mini-common library](#toward-a-mini-common-library)
 - [Roadmap](#roadmap)
 - [Build aggregation](#build-aggregation)
@@ -251,28 +251,34 @@ operator-supplied secret. The default (no-KMS) path skips steps 1–2 entirely.
 
 ---
 
-## Open design decision: the client registry
+## Resolved design decision: the client registry folded into mini-directory
 
-mini-idp owns a **client registry** today: registered OAuth clients, their Argon2id-hashed
-secrets, and their grants, in its own JSON store. mini-directory is meant to be the single source
-of truth for *all* identities — including **service accounts**, which is essentially what an
-mini-idp OAuth client *is*.
+mini-idp used to own a **client registry**: registered OAuth clients, their Argon2id-hashed secrets,
+and their grants, in its own JSON store. That registry is **gone** — service accounts (which is what
+an mini-idp OAuth client *is*) now live in **mini-directory**, the single source of service-account
+identity, and mini-idp resolves a client's credentials and grants from it at token issuance.
 
-**The open question:** should mini-idp's client registry fold into mini-directory later?
+**How it works.** A service account is a mini-directory {@code SERVICE_ACCOUNT} account: its id is
+the token {@code sub}, its Argon2id secret hash stays *inside* mini-directory, and its grants are the
+flat {@code (action, resource)} form (a key-group operation is {@code action = KeyOperation},
+{@code resource = keyGroup}; the control flag is the account's {@code admin}). At {@code
+/oauth/token}, mini-idp POSTs the presented credentials to mini-directory's
+{@code /admin/service-accounts/authenticate} (over the `ServiceAccountDirectory` SPI —
+`HttpServiceAccountDirectory` in production, an in-memory fake in tests). mini-directory verifies the
+secret (constant-time, no oracle) and returns the resolved principal + grants, which mini-idp
+reassembles into the same per-key-group `grants` claim. **The token endpoint, claim schema, and
+single-`invalid_client` behavior are unchanged** — an end-to-end test issues a token sourced from a
+real mini-directory and verifies its `sub`/`grants` are identical to the old registry's output.
 
-- **For folding in.** One identity model, one place to manage grants, no drift between "a service
-  account" and "an OAuth client." mini-idp becomes a pure token issuer reading from mini-directory,
-  matching how mini-oidc is intended to read human users from it.
-- **Against (or: not yet).** mini-idp is *shipping* and self-contained; its registry doubles as
-  its credential store (hashed secrets), which is issuer-specific concern, not directory data.
-  Coupling a working service to a still-scaffolded one is a regression risk. The token *claim*
-  contract already aligns regardless of where the data lives, so there is no urgency.
+Why this resolved the way it did: the credential (hashed secret) verification was the one thing the
+"keep it in the issuer" camp worried about — and it is handled cleanly by keeping the hash in
+mini-directory and exposing a *verification* endpoint (the secret is checked there; the hash never
+leaves), so mini-idp is now a pure token issuer with no identity store of its own.
 
-**Current lean:** keep mini-idp's registry in place while mini-directory matures, and treat the
-directory's service-account model as the eventual home for the *grant mappings* first, with the
-*credential* (hashed secret) possibly staying in the issuer. Revisit once mini-directory has a
-real read API. This decision is deliberately left open and recorded here rather than pre-committed
-in code.
+**Migration.** Existing `clients.json` files are imported by `ClientRegistryMigration` (a
+mini-directory CLI): each client record becomes a service account, preserving its id, secret hash,
+enabled flag, and grants. It is idempotent and reads `clients.json` as plain JSON (no mini-idp
+dependency). See `services/mini-directory/README.md`.
 
 ---
 

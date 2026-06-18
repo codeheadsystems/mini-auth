@@ -220,6 +220,29 @@ public final class DirectoryService {
     return new Registration(account, secret);
   }
 
+  /**
+   * Import a service account with a pre-existing id and Argon2id secret hash — the migration path for
+   * records minted elsewhere (e.g. mini-idp's old client registry), where the secret cannot be
+   * regenerated. The hash is stored verbatim and verified later under its own recorded parameters.
+   *
+   * @throws IllegalStateException    if the id already exists.
+   * @throws IllegalArgumentException if it references a missing group/role.
+   */
+  public synchronized Account importServiceAccount(final String id, final String displayName,
+                                                   final boolean admin, final boolean enabled,
+                                                   final List<String> memberOf, final List<String> roleIds,
+                                                   final List<GrantSpec> grants, final SecretHash secretHash) {
+    if (accounts.containsKey(id)) {
+      throw new IllegalStateException("account already exists: " + id);
+    }
+    final Account account = new Account(id, PrincipalKind.SERVICE_ACCOUNT, displayName, admin, enabled,
+        memberOf, roleIds, grants, secretHash);
+    requireMembershipsExist(account.memberOf(), account.roles());
+    accounts.put(id, account);
+    persist();
+    return account;
+  }
+
   /** @return all accounts, in insertion order. */
   public synchronized List<Account> listAccounts() {
     return new ArrayList<>(accounts.values());

@@ -79,6 +79,14 @@ public final class Dtos {
                                   List<String> roles, List<GrantSpec> grants) {
   }
 
+  /**
+   * Body of {@code POST /admin/service-accounts/authenticate}: a token issuer presents a client's
+   * credentials for verification (the secret is verified server-side, never stored or echoed).
+   */
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public record VerifyServiceAccountRequest(String id, String secret) {
+  }
+
   /** Body of {@code POST /admin/roles}. */
   @JsonIgnoreProperties(ignoreUnknown = true)
   public record RoleRequest(String id, String description, List<GrantSpec> grants) {

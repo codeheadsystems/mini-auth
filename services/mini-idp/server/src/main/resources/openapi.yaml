@@ -3,16 +3,19 @@ info:
   title: mini-idp
   version: "1.0.0"
   description: |
-    **mini-idp** is a small standalone identity provider. It registers clients, issues short-lived
-    Ed25519-signed JWT access tokens via the OAuth 2.0 client-credentials grant, and publishes its
-    public signing keys (JWKS) so a verifier (the companion **mini-kms** service) can validate
-    tokens **offline**.
+    **mini-idp** is a small identity provider. It issues short-lived Ed25519-signed JWT access
+    tokens via the OAuth 2.0 client-credentials grant, and publishes its public signing keys (JWKS)
+    so a verifier (the companion **mini-kms** service) can validate tokens **offline**. Service
+    accounts (the OAuth clients) are **not** managed here — they live in **mini-directory**, the
+    family's single source of service-account identity; mini-idp resolves a client's credentials and
+    grants from mini-directory at token issuance.
 
     This document is the authoritative contract: a verifier can integrate against it without
-    reading mini-idp source. It fully describes the token endpoint, the JWKS shape, the discovery
-    document, the admin API, and — most importantly for integrators — the **JWT claim schema**
-    (see the `JwtClaims` schema), whose `grants` claim maps cleanly onto mini-kms's
-    `Principal` / `KeyOperation` model.
+    reading mini-idp source. It describes the token endpoint, the JWKS shape, the discovery
+    document, mini-idp's own admin API (key rotation, revocation, audit), and — most importantly for
+    integrators — the **JWT claim schema** (see the `JwtClaims` schema), whose `grants` claim maps
+    cleanly onto mini-kms's `Principal` / `KeyOperation` model. (To create or manage clients, use
+    mini-directory's `/admin/service-accounts` API.)
 
     ## Token verification (what a verifier does)
     1. Fetch `GET /.well-known/jwks.json` and cache it.
@@ -161,108 +164,6 @@ paths:
           content:
             text/html:
               schema: { type: string }
-
-  /admin/clients:
-    post:
-      tags: [admin]
-      summary: Register a client
-      description: Creates a client and returns its one-time plaintext secret (shown only once).
-      security:
-        - adminBearer: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/RegisterClientRequest" }
-      responses:
-        "201":
-          description: The created client and its one-time secret.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/RegisterClientResponse" }
-        "401":
-          description: Missing or invalid admin token.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-    get:
-      tags: [admin]
-      summary: List clients
-      description: Lists all clients. Secret hashes are never returned.
-      security:
-        - adminBearer: []
-      responses:
-        "200":
-          description: The clients.
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/ClientView" }
-        "401":
-          description: Missing or invalid admin token.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-
-  /admin/clients/{id}:
-    delete:
-      tags: [admin]
-      summary: Remove a client
-      security:
-        - adminBearer: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "204":
-          description: Removed.
-        "401":
-          description: Missing or invalid admin token.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-        "404":
-          description: No such client.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-
-  /admin/clients/{id}/grants:
-    put:
-      tags: [admin]
-      summary: Set a client's grants
-      description: Replaces the client's authorization (control-plane flag + per-key-group operations).
-      security:
-        - adminBearer: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/GrantsClaim" }
-      responses:
-        "200":
-          description: The updated client.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ClientView" }
-        "401":
-          description: Missing or invalid admin token.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-        "404":
-          description: No such client.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
 
   /admin/keys/rotate:
     post:
@@ -502,38 +403,6 @@ components:
           type: array
           items: { type: string }
       required: [issuer, token_endpoint, jwks_uri]
-
-    RegisterClientRequest:
-      type: object
-      properties:
-        displayName:
-          type: string
-          description: Optional human label.
-        authorization:
-          $ref: "#/components/schemas/GrantsClaim"
-
-    RegisterClientResponse:
-      type: object
-      properties:
-        clientId: { type: string }
-        secret:
-          type: string
-          description: The one-time plaintext secret. Store it now; it is not recoverable later.
-        displayName: { type: string }
-        authorization: { $ref: "#/components/schemas/GrantsClaim" }
-        createdAt: { type: integer, description: Epoch seconds. }
-      required: [clientId, secret, createdAt]
-
-    ClientView:
-      type: object
-      description: A client as listed by the admin API. Never includes secret material.
-      properties:
-        clientId: { type: string }
-        displayName: { type: string }
-        enabled: { type: boolean }
-        createdAt: { type: integer, description: Epoch seconds. }
-        authorization: { $ref: "#/components/schemas/GrantsClaim" }
-      required: [clientId, enabled, createdAt]
 
     RevocationRequest:
       type: object

@@ -275,6 +275,39 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /admin/service-accounts/authenticate:
+    post:
+      tags: [principals, admin]
+      summary: Verify a service-account credential and resolve it
+      description: |
+        The read API a token issuer (mini-idp) calls at token issuance. Admin-guarded — only an
+        authorized issuer may use it — with the client's secret in the body. The secret is verified
+        here (Argon2id, constant-time), so the secret hash never leaves the directory. On success
+        returns the resolved principal (id + admin + fully-expanded grants); on any failure a single
+        generic 401 (no oracle).
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, secret]
+              properties:
+                id: { type: string }
+                secret: { type: string }
+      responses:
+        "200":
+          description: The resolved principal (same shape as the resolution endpoint).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResolutionView" }
+        "401":
+          description: Authentication failed (generic; no oracle).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /admin/principals:
     get:
       tags: [principals, admin]

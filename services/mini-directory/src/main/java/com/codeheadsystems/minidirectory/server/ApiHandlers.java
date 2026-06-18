@@ -13,6 +13,7 @@ import com.codeheadsystems.minidirectory.server.dto.Dtos.ResolutionView;
 import com.codeheadsystems.minidirectory.server.dto.Dtos.RoleRequest;
 import com.codeheadsystems.minidirectory.server.dto.Dtos.RoleUpdateRequest;
 import com.codeheadsystems.minidirectory.server.dto.Dtos.ServiceAccountCreated;
+import com.codeheadsystems.minidirectory.server.dto.Dtos.VerifyServiceAccountRequest;
 import com.codeheadsystems.minidirectory.server.http.ApiException;
 import com.codeheadsystems.minidirectory.server.http.HttpResponse;
 import com.codeheadsystems.minidirectory.server.http.Json;
@@ -81,6 +82,7 @@ public final class ApiHandlers {
     // Principals — humans + service accounts (admin).
     router.route("POST", "/admin/humans", this::createHuman);
     router.route("POST", "/admin/service-accounts", this::createServiceAccount);
+    router.route("POST", "/admin/service-accounts/authenticate", this::authenticateServiceAccount);
     router.route("GET", "/admin/principals", this::listPrincipals);
     router.route("GET", "/admin/principals/{id}", this::getPrincipal);
     router.route("PUT", "/admin/principals/{id}/assignment", this::assign);
@@ -258,6 +260,28 @@ public final class ApiHandlers {
     final String id = ctx.pathParam("id");
     return HttpResponse.json(200, ResolutionView.from(directory.resolve(id)
         .orElseThrow(() -> ApiException.notFound("no such principal: " + id))));
+  }
+
+  /**
+   * Verify a service account's credential and return its resolution — the read API a token issuer
+   * (mini-idp) calls at token issuance. Admin-guarded (only authorized issuers may use it), with the
+   * client secret in the body. Verification (Argon2id, constant-time) happens here, so the secret
+   * hash never leaves the directory; on any failure it returns a single generic {@code 401} — no
+   * oracle distinguishing unknown-account from wrong-secret.
+   */
+  private HttpResponse authenticateServiceAccount(final RequestContext ctx) {
+    requireAdmin(ctx);
+    final VerifyServiceAccountRequest request = Json.parse(ctx.body(), VerifyServiceAccountRequest.class);
+    final char[] secret = request.secret() == null ? new char[0] : request.secret().toCharArray();
+    final java.util.Optional<Account> account;
+    try {
+      account = directory.authenticate(request.id(), secret);
+    } finally {
+      java.util.Arrays.fill(secret, '\0');
+    }
+    final Account authenticated = account.orElseThrow(
+        () -> new ApiException(401, "invalid_client", "service account authentication failed"));
+    return HttpResponse.json(200, ResolutionView.from(directory.resolve(authenticated.id()).orElseThrow()));
   }
 
   // ---- Helpers -------------------------------------------------------------------------------

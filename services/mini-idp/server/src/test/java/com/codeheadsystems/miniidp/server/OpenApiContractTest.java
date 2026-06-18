@@ -39,7 +39,8 @@ class OpenApiContractTest {
   void setUp(@TempDir final Path dir) throws IOException {
     final ServerConfig config = ServerConfig.resolve(
         new String[] {"--port", "0", "--data-dir", dir.toString()}, Map.of());
-    server = IdpServer.create(config, "admin", Clock.systemUTC());
+    server = IdpServer.create(config, "admin",
+        new com.codeheadsystems.miniidp.directory.InMemoryServiceAccountDirectory(), Clock.systemUTC());
     server.start();
     baseUrl = "http://127.0.0.1:" + server.address().getPort();
     client = HttpClient.newHttpClient();
@@ -69,7 +70,7 @@ class OpenApiContractTest {
     assertTrue(documented.contains("/oauth/token"));
     assertTrue(documented.contains("/.well-known/jwks.json"));
     assertTrue(documented.contains("/.well-known/idp-configuration"));
-    assertTrue(documented.contains("/admin/clients"));
+    assertTrue(documented.contains("/admin/keys/rotate"));
 
     // Every documented path+method must resolve on the live server (never 404/405).
     final Iterator<Map.Entry<String, JsonNode>> pathEntries = paths.properties().iterator();

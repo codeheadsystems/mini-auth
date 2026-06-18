@@ -1,26 +1,21 @@
 package com.codeheadsystems.miniidp.server;
 
-import com.codeheadsystems.miniidp.model.ClientRecord;
-import com.codeheadsystems.miniidp.server.dto.Dtos.ClientView;
-import com.codeheadsystems.miniidp.server.dto.Dtos.RegisterClientRequest;
-import com.codeheadsystems.miniidp.server.dto.Dtos.RegisterClientResponse;
+import com.codeheadsystems.miniidp.directory.ServiceAccountDirectory;
+import com.codeheadsystems.miniidp.directory.ServiceAccountDirectory.ResolvedClient;
 import com.codeheadsystems.miniidp.server.dto.Dtos.RevocationRequest;
 import com.codeheadsystems.miniidp.server.http.ApiException;
 import com.codeheadsystems.miniidp.server.http.HttpResponse;
 import com.codeheadsystems.miniidp.server.http.Json;
 import com.codeheadsystems.miniidp.server.http.RequestContext;
 import com.codeheadsystems.miniidp.server.http.Router;
-import com.codeheadsystems.miniidp.service.ClientService;
-import com.codeheadsystems.minitoken.auth.Authorization;
 import com.codeheadsystems.minitoken.service.AuditService;
 import com.codeheadsystems.minitoken.service.RevocationService;
 import com.codeheadsystems.minitoken.service.SigningKeyService;
 import com.codeheadsystems.minitoken.service.TokenIssuer;
 import com.codeheadsystems.minitoken.service.TokenIssuer.IssuedToken;
-import com.codeheadsystems.minitoken.token.GrantsClaim;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,18 +26,19 @@ import java.util.Optional;
  * Builds the {@link Router} wiring every documented endpoint to a handler.
  *
  * <p>Public endpoints (token, JWKS, discovery, health, spec, docs) are open; every {@code /admin}
- * endpoint first calls {@link AdminAuthenticator#requireAdmin} on the request's
- * {@code Authorization} header. Handlers stay thin: they validate input, call a core service, and
- * map the result to an {@link HttpResponse}; all crypto/identity logic lives in core.
+ * endpoint first calls {@link AdminAuthenticator#requireAdmin}. Handlers stay thin: validate input,
+ * call a collaborator, map the result to an {@link HttpResponse}.
  *
- * <p>No secret material is ever logged or echoed except the one-time client secret in the
- * registration response (by design). The token endpoint returns a single generic error for any
- * authentication failure — no oracle distinguishing unknown-client from wrong-secret.
+ * <p>mini-idp no longer owns a client registry — client identity, credentials, and grants come from
+ * <b>mini-directory</b> via the {@link ServiceAccountDirectory} seam (so service accounts live in one
+ * place). The token endpoint's contract is unchanged: client_credentials only, the same claim set,
+ * and a single generic {@code invalid_client} for any authentication failure (no oracle). The
+ * remaining admin endpoints are mini-idp's own concern — key rotation, revocation, and the audit log.
  */
 public final class ApiHandlers {
 
   private final ServerConfig config;
-  private final ClientService clients;
+  private final ServiceAccountDirectory directory;
   private final SigningKeyService signingKeys;
   private final RevocationService revocations;
   private final AuditService audit;
@@ -52,13 +48,13 @@ public final class ApiHandlers {
   private final Clock clock;
 
   /** Wire the handlers with their collaborators. */
-  public ApiHandlers(final ServerConfig config, final ClientService clients,
+  public ApiHandlers(final ServerConfig config, final ServiceAccountDirectory directory,
                      final SigningKeyService signingKeys, final RevocationService revocations,
                      final AuditService audit, final TokenIssuer tokenIssuer,
                      final AdminAuthenticator adminAuth, final OpenApiDocument openApi,
                      final Clock clock) {
     this.config = config;
-    this.clients = clients;
+    this.directory = directory;
     this.signingKeys = signingKeys;
     this.revocations = revocations;
     this.audit = audit;
@@ -82,11 +78,8 @@ public final class ApiHandlers {
     router.route("GET", "/docs/swagger-ui.css", ctx -> asset("swagger-ui.css", "text/css"));
     router.route("GET", "/docs/swagger-ui-bundle.js",
         ctx -> asset("swagger-ui-bundle.js", "application/javascript"));
-    // Admin endpoints (each guarded inside the handler).
-    router.route("POST", "/admin/clients", this::registerClient);
-    router.route("GET", "/admin/clients", this::listClients);
-    router.route("DELETE", "/admin/clients/{id}", this::deleteClient);
-    router.route("PUT", "/admin/clients/{id}/grants", this::setGrants);
+    // Admin endpoints (mini-idp's own; each guarded inside the handler). Client management now lives
+    // in mini-directory.
     router.route("POST", "/admin/keys/rotate", this::rotateKeys);
     router.route("POST", "/admin/revocations", this::revoke);
     router.route("GET", "/admin/revocations", this::listRevocations);
@@ -98,8 +91,7 @@ public final class ApiHandlers {
 
   private HttpResponse token(final RequestContext ctx) {
     final Map<String, String> form = ctx.formParams();
-    final String grantType = form.get("grant_type");
-    if (!"client_credentials".equals(grantType)) {
+    if (!"client_credentials".equals(form.get("grant_type"))) {
       throw new ApiException(400, "unsupported_grant_type",
           "only the client_credentials grant is supported");
     }
@@ -113,17 +105,17 @@ public final class ApiHandlers {
     }
 
     final char[] secretChars = secret.toCharArray();
-    final Optional<ClientRecord> authenticated;
+    final Optional<ResolvedClient> resolved;
     try {
-      authenticated = clients.authenticate(clientId, secretChars);
+      resolved = directory.authenticate(clientId, secretChars);
     } finally {
-      java.util.Arrays.fill(secretChars, '\0');
+      Arrays.fill(secretChars, '\0');
     }
     // Single generic failure regardless of which check failed (no credential oracle).
-    final ClientRecord client = authenticated.orElseThrow(ApiException::invalidClient);
+    final ResolvedClient client = resolved.orElseThrow(ApiException::invalidClient);
 
-    final IssuedToken issued = tokenIssuer.issue(client.clientId(), client.authorization());
-    audit.record("token.issued", client.clientId(), "jti=" + issued.jti());
+    final IssuedToken issued = tokenIssuer.issue(client.subject(), client.authorization());
+    audit.record("token.issued", client.subject(), "jti=" + issued.jti());
 
     final Map<String, Object> body = new LinkedHashMap<>();
     body.put("access_token", issued.accessToken());
@@ -171,55 +163,7 @@ public final class ApiHandlers {
         com.codeheadsystems.miniidp.server.http.StaticResource.bytes("/swagger-ui/" + file));
   }
 
-  // ---- Admin endpoints -----------------------------------------------------------------------
-
-  private HttpResponse registerClient(final RequestContext ctx) {
-    requireAdmin(ctx);
-    final RegisterClientRequest request = Json.parse(ctx.body(), RegisterClientRequest.class);
-    final Authorization authorization = toAuthorization(request.authorization());
-    final ClientService.Registration registration = clients.register(request.displayName(), authorization);
-    final ClientRecord record = registration.client();
-    audit.record("client.registered", record.clientId(), null);
-
-    // The one place a plaintext secret leaves the service. Converting char[] -> String for JSON
-    // means the String lingers until GC; a stricter build would stream it. We zero our char[].
-    final String secret = new String(registration.secret());
-    java.util.Arrays.fill(registration.secret(), '\0');
-    final RegisterClientResponse response = new RegisterClientResponse(
-        record.clientId(), secret, record.displayName(),
-        GrantsClaim.from(record.authorization()), record.createdAt());
-    return HttpResponse.json(201, response);
-  }
-
-  private HttpResponse listClients(final RequestContext ctx) {
-    requireAdmin(ctx);
-    final List<ClientView> views = new ArrayList<>();
-    for (final ClientRecord record : clients.list()) {
-      views.add(ClientView.from(record));
-    }
-    return HttpResponse.json(200, views);
-  }
-
-  private HttpResponse deleteClient(final RequestContext ctx) {
-    requireAdmin(ctx);
-    final String id = ctx.pathParam("id");
-    if (!clients.remove(id)) {
-      throw ApiException.notFound("no such client: " + id);
-    }
-    audit.record("client.removed", id, null);
-    return HttpResponse.noContent();
-  }
-
-  private HttpResponse setGrants(final RequestContext ctx) {
-    requireAdmin(ctx);
-    final String id = ctx.pathParam("id");
-    final GrantsClaim grants = Json.parse(ctx.body(), GrantsClaim.class);
-    final Authorization authorization = toAuthorization(grants);
-    final ClientRecord updated = clients.setAuthorization(id, authorization)
-        .orElseThrow(() -> ApiException.notFound("no such client: " + id));
-    audit.record("client.grants_set", id, null);
-    return HttpResponse.json(200, ClientView.from(updated));
-  }
+  // ---- Admin endpoints (mini-idp's own) ------------------------------------------------------
 
   private HttpResponse rotateKeys(final RequestContext ctx) {
     requireAdmin(ctx);
@@ -258,19 +202,6 @@ public final class ApiHandlers {
 
   private void requireAdmin(final RequestContext ctx) {
     adminAuth.requireAdmin(ctx.header("Authorization"));
-  }
-
-  /** Convert the wire authorization (may be null) into a domain {@link Authorization}. */
-  private static Authorization toAuthorization(final GrantsClaim grants) {
-    if (grants == null) {
-      return Authorization.none();
-    }
-    try {
-      return grants.toAuthorization();
-    } catch (final IllegalArgumentException e) {
-      // e.g. an unknown KeyOperation name in a grant.
-      throw ApiException.badRequest("invalid grant: " + e.getMessage());
-    }
   }
 
   /** Decode an HTTP Basic {@code Authorization} header into {clientId, secret}, or null. */

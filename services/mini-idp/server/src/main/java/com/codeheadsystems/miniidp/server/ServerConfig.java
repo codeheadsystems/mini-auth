@@ -1,6 +1,5 @@
 package com.codeheadsystems.miniidp.server;
 
-import com.codeheadsystems.miniidp.secret.Argon2Settings;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -8,27 +7,31 @@ import java.util.Map;
 
 /**
  * Resolved server configuration: where to listen, who we are (issuer/audience), how long tokens
- * live, the Argon2 cost for client secrets, where the JSON stores live, and where the bootstrap
- * admin token comes from. Values come from CLI flags (highest priority), then environment
- * variables, then sensible per-user defaults — mirroring mini-kms's {@code ServerConfig}.
+ * live, where the JSON stores live, where the bootstrap admin token comes from, and how to reach
+ * mini-directory (the service-account source). Values come from CLI flags (highest priority), then
+ * environment variables, then sensible per-user defaults — mirroring mini-kms's {@code ServerConfig}.
  *
- * <p>Secrets are deliberately NOT stored here as plaintext: the admin token is resolved from its
- * source by {@link ServerMain} (env var or file) and handed straight to the authenticator; only
- * the token <em>file path</em> (config, not a secret) lives here.
+ * <p>Secrets are deliberately NOT stored here as plaintext: tokens are resolved from their sources
+ * by {@link ServerMain} (env var or file); only the <em>file paths</em> (config, not secrets) live
+ * here. Client secret hashing moved to mini-directory, so there is no Argon2 config here anymore.
  *
  * <p>Recognized flags / env vars:
  * <pre>
- *   --host H                 MINIIDP_HOST              loopback bind host (default 127.0.0.1)
- *   --port N                 MINIIDP_PORT              TCP port (default 8455)
- *   --issuer URL             MINIIDP_ISSUER            issuer URL (default http://&lt;host&gt;:&lt;port&gt;)
- *   --audience AUD           MINIIDP_AUDIENCE          token audience (default mini-kms)
- *   --token-ttl-seconds N    MINIIDP_TOKEN_TTL_SECONDS access-token lifetime (default 300)
- *   --data-dir PATH          MINIIDP_DATA_DIR          directory for the JSON stores
- *   --admin-token-file PATH  MINIIDP_ADMIN_TOKEN_FILE  file holding the admin token
- *                                                      (alt: MINIIDP_ADMIN_TOKEN env)
- *   --argon-memory-kib N     MINIIDP_ARGON_MEMORY_KIB  Argon2 memory cost for client secrets
- *   --argon-iterations N     MINIIDP_ARGON_ITERATIONS  Argon2 time cost
- *   --argon-parallelism N    MINIIDP_ARGON_PARALLELISM Argon2 lanes
+ *   --host H                  MINIIDP_HOST                 loopback bind host (default 127.0.0.1)
+ *   --port N                  MINIIDP_PORT                 TCP port (default 8455)
+ *   --issuer URL              MINIIDP_ISSUER               issuer URL (default http://&lt;host&gt;:&lt;port&gt;)
+ *   --audience AUD            MINIIDP_AUDIENCE             token audience (default mini-kms)
+ *   --token-ttl-seconds N     MINIIDP_TOKEN_TTL_SECONDS    access-token lifetime (default 300)
+ *   --data-dir PATH           MINIIDP_DATA_DIR             directory for the JSON stores
+ *   --admin-token-file PATH   MINIIDP_ADMIN_TOKEN_FILE     file holding mini-idp's admin token
+ *                                                          (alt: MINIIDP_ADMIN_TOKEN env)
+ *   --directory-url URL       MINIIDP_DIRECTORY_URL        mini-directory base URL (service-account source)
+ *   --directory-token-file P  MINIIDP_DIRECTORY_TOKEN_FILE mini-directory admin token file
+ *                                                          (alt: MINIIDP_DIRECTORY_TOKEN env)
+ *   --kms-tcp HOST:PORT       MINIIDP_KMS_TCP              wrap signing keys under mini-kms (optional)
+ *   --kms-key-group NAME      MINIIDP_KMS_KEY_GROUP        the mini-kms key group
+ *   --kms-api-token-file PATH MINIIDP_KMS_API_TOKEN_FILE   mini-kms data-plane token file
+ *                                                          (alt: MINIIDP_KMS_API_TOKEN env)
  * </pre>
  */
 public final class ServerConfig {
@@ -52,7 +55,8 @@ public final class ServerConfig {
   private final Duration tokenTtl;
   private final Path dataDir;
   private final Path adminTokenFilePath;
-  private final Argon2Settings argonSettings;
+  private final String directoryUrl;
+  private final Path directoryTokenFilePath;
   private final String kmsHost;
   private final int kmsPort;
   private final String kmsKeyGroup;
@@ -60,8 +64,8 @@ public final class ServerConfig {
 
   ServerConfig(final String host, final int port, final String issuer, final String audience,
                final Duration tokenTtl, final Path dataDir, final Path adminTokenFilePath,
-               final Argon2Settings argonSettings, final String kmsHost, final int kmsPort,
-               final String kmsKeyGroup, final Path kmsApiTokenFilePath) {
+               final String directoryUrl, final Path directoryTokenFilePath, final String kmsHost,
+               final int kmsPort, final String kmsKeyGroup, final Path kmsApiTokenFilePath) {
     this.host = host;
     this.port = port;
     this.issuer = issuer;
@@ -69,7 +73,8 @@ public final class ServerConfig {
     this.tokenTtl = tokenTtl;
     this.dataDir = dataDir;
     this.adminTokenFilePath = adminTokenFilePath;
-    this.argonSettings = argonSettings;
+    this.directoryUrl = directoryUrl;
+    this.directoryTokenFilePath = directoryTokenFilePath;
     this.kmsHost = kmsHost;
     this.kmsPort = kmsPort;
     this.kmsKeyGroup = kmsKeyGroup;
@@ -91,9 +96,8 @@ public final class ServerConfig {
     Integer ttlSeconds = envInt(env, "MINIIDP_TOKEN_TTL_SECONDS");
     String dataDir = env.get("MINIIDP_DATA_DIR");
     String adminTokenFile = env.get("MINIIDP_ADMIN_TOKEN_FILE");
-    Integer argonMemory = envInt(env, "MINIIDP_ARGON_MEMORY_KIB");
-    Integer argonIterations = envInt(env, "MINIIDP_ARGON_ITERATIONS");
-    Integer argonParallelism = envInt(env, "MINIIDP_ARGON_PARALLELISM");
+    String directoryUrl = env.get("MINIIDP_DIRECTORY_URL");
+    String directoryTokenFile = env.get("MINIIDP_DIRECTORY_TOKEN_FILE");
     String kmsTcp = env.get("MINIIDP_KMS_TCP");
     String kmsKeyGroup = env.get("MINIIDP_KMS_KEY_GROUP");
     String kmsApiTokenFile = env.get("MINIIDP_KMS_API_TOKEN_FILE");
@@ -108,9 +112,8 @@ public final class ServerConfig {
         case "--token-ttl-seconds" -> ttlSeconds = Integer.parseInt(requireValue(args, ++i, arg));
         case "--data-dir" -> dataDir = requireValue(args, ++i, arg);
         case "--admin-token-file" -> adminTokenFile = requireValue(args, ++i, arg);
-        case "--argon-memory-kib" -> argonMemory = Integer.parseInt(requireValue(args, ++i, arg));
-        case "--argon-iterations" -> argonIterations = Integer.parseInt(requireValue(args, ++i, arg));
-        case "--argon-parallelism" -> argonParallelism = Integer.parseInt(requireValue(args, ++i, arg));
+        case "--directory-url" -> directoryUrl = requireValue(args, ++i, arg);
+        case "--directory-token-file" -> directoryTokenFile = requireValue(args, ++i, arg);
         case "--kms-tcp" -> kmsTcp = requireValue(args, ++i, arg);
         case "--kms-key-group" -> kmsKeyGroup = requireValue(args, ++i, arg);
         case "--kms-api-token-file" -> kmsApiTokenFile = requireValue(args, ++i, arg);
@@ -136,11 +139,7 @@ public final class ServerConfig {
 
     final Path resolvedDataDir = dataDir != null ? Paths.get(dataDir) : defaultDataDir(env);
     final Path adminTokenFilePath = adminTokenFile != null ? Paths.get(adminTokenFile) : null;
-
-    final Argon2Settings argon = new Argon2Settings(
-        argonMemory != null ? argonMemory : Argon2Settings.DEFAULT_MEMORY_KIB,
-        argonIterations != null ? argonIterations : Argon2Settings.DEFAULT_ITERATIONS,
-        argonParallelism != null ? argonParallelism : Argon2Settings.DEFAULT_PARALLELISM);
+    final Path directoryTokenFilePath = directoryTokenFile != null ? Paths.get(directoryTokenFile) : null;
 
     // mini-kms key wrapping (optional): --kms-tcp HOST:PORT --kms-key-group NAME enable it.
     final String kmsHost = kmsTcp == null ? null : hostOf(kmsTcp);
@@ -148,8 +147,8 @@ public final class ServerConfig {
     final Path kmsApiTokenFilePath = kmsApiTokenFile != null ? Paths.get(kmsApiTokenFile) : null;
 
     return new ServerConfig(resolvedHost, resolvedPort, resolvedIssuer, resolvedAudience,
-        Duration.ofSeconds(resolvedTtl), resolvedDataDir, adminTokenFilePath, argon,
-        kmsHost, kmsPort, kmsKeyGroup, kmsApiTokenFilePath);
+        Duration.ofSeconds(resolvedTtl), resolvedDataDir, adminTokenFilePath,
+        directoryUrl, directoryTokenFilePath, kmsHost, kmsPort, kmsKeyGroup, kmsApiTokenFilePath);
   }
 
   private static String hostOf(final String hostPort) {
@@ -236,9 +235,19 @@ public final class ServerConfig {
     return adminTokenFilePath;
   }
 
-  /** @return the Argon2 parameters used to hash client secrets. */
-  public Argon2Settings argonSettings() {
-    return argonSettings;
+  /** @return the mini-directory base URL (the service-account source), or null. */
+  public String directoryUrl() {
+    return directoryUrl;
+  }
+
+  /** @return the file holding the mini-directory admin token, or null (env is then required). */
+  public Path directoryTokenFilePath() {
+    return directoryTokenFilePath;
+  }
+
+  /** @return whether a mini-directory source is configured (required for token issuance). */
+  public boolean directoryConfigured() {
+    return directoryUrl != null && !directoryUrl.isBlank();
   }
 
   /** @return the token endpoint URL. */

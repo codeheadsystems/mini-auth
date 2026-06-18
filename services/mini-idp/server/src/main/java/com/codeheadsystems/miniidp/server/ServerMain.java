@@ -1,5 +1,7 @@
 package com.codeheadsystems.miniidp.server;
 
+import com.codeheadsystems.miniidp.directory.HttpServiceAccountDirectory;
+import com.codeheadsystems.miniidp.directory.ServiceAccountDirectory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -29,6 +31,9 @@ public final class ServerMain {
   /** Env var carrying the mini-kms data-plane API token (when signing keys are KMS-wrapped). */
   static final String ENV_KMS_API_TOKEN = "MINIIDP_KMS_API_TOKEN";
 
+  /** Env var carrying the mini-directory admin token (mini-idp reads service accounts from there). */
+  static final String ENV_DIRECTORY_TOKEN = "MINIIDP_DIRECTORY_TOKEN";
+
   private ServerMain() {
   }
 
@@ -49,8 +54,9 @@ public final class ServerMain {
     final ServerConfig config = ServerConfig.resolve(args, env);
     final String adminToken = resolveAdminToken(env, config.adminTokenFilePath());
     final String kmsApiToken = resolveKmsApiToken(env, config);
+    final ServiceAccountDirectory directory = resolveDirectory(env, config);
 
-    final IdpServer server = IdpServer.create(config, adminToken, kmsApiToken, Clock.systemUTC());
+    final IdpServer server = IdpServer.create(config, adminToken, kmsApiToken, directory, Clock.systemUTC());
 
     final CountDownLatch shutdown = new CountDownLatch(1);
     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -64,6 +70,7 @@ public final class ServerMain {
         + ":" + server.address().getPort());
     System.out.println("issuer=" + config.issuer() + "  audience=" + config.audience()
         + "  token TTL=" + config.tokenTtl().toSeconds() + "s");
+    System.out.println("service accounts: read from mini-directory at " + config.directoryUrl());
     System.out.println("signing keys: " + (config.kmsEnabled()
         ? "wrapped under mini-kms group '" + config.kmsKeyGroup() + "' at " + config.kmsHost() + ":" + config.kmsPort()
         : "local file (plaintext, 0600)"));
@@ -96,6 +103,33 @@ public final class ServerMain {
     }
     throw new IllegalStateException("no admin token configured: set " + ENV_ADMIN_TOKEN
         + " or provide --admin-token-file");
+  }
+
+  /** Resolve a token from its env var or a file; throws {@code message} if neither is present. */
+  private static String resolveToken(final String fromEnv, final Path file, final String message)
+      throws IOException {
+    if (fromEnv != null && !fromEnv.isBlank()) {
+      return fromEnv.trim();
+    }
+    if (file != null) {
+      final String fromFile = Files.readString(file, StandardCharsets.UTF_8).strip();
+      if (!fromFile.isEmpty()) {
+        return fromFile;
+      }
+    }
+    throw new IllegalStateException(message);
+  }
+
+  /** Build the mini-directory-backed service-account source (required — there is no local registry). */
+  private static ServiceAccountDirectory resolveDirectory(final Map<String, String> env,
+                                                          final ServerConfig config) throws IOException {
+    if (!config.directoryConfigured()) {
+      throw new IllegalStateException("no mini-directory configured: set --directory-url "
+          + "(mini-idp reads service accounts from mini-directory; there is no local client registry)");
+    }
+    final String token = resolveToken(env.get(ENV_DIRECTORY_TOKEN), config.directoryTokenFilePath(),
+        "no mini-directory token: set " + ENV_DIRECTORY_TOKEN + " or provide --directory-token-file");
+    return new HttpServiceAccountDirectory(config.directoryUrl(), token);
   }
 
   /** Resolve the mini-kms API token (env or file) when KMS wrapping is enabled, else null. */

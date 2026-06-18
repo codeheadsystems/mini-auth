@@ -233,12 +233,13 @@ services/mini-kms/client/build/install/client/bin/kms-admin --tcp 127.0.0.1:9123
 
 # Service: mini-idp (`services/mini-idp`)
 
-mini-idp is an **educational** standalone identity provider in Java. It registers clients, issues
-short-lived Ed25519-signed JWT access tokens via the OAuth 2.0 **client-credentials** grant, and
-publishes its public signing keys (JWKS) so a verifier can validate tokens **offline**. Real crypto
-(Argon2id for secrets, Ed25519/EdDSA for signatures), not production-audited. **It does not depend
-on mini-kms** at the code level — it mirrors its conventions and targets its eventual verification
-contract.
+mini-idp is an **educational** identity provider in Java. It issues short-lived Ed25519-signed JWT
+access tokens via the OAuth 2.0 **client-credentials** grant and publishes its public signing keys
+(JWKS) so a verifier can validate tokens **offline**. It is a pure token issuer: **service accounts
+(the OAuth clients) live in mini-directory**, and mini-idp resolves a client's credentials and grants
+from there at token issuance (over the `ServiceAccountDirectory` SPI). Real crypto (Ed25519/EdDSA),
+not production-audited. Optionally wraps its signing keys under mini-kms (the recursive integration);
+otherwise no code-level dependency on mini-kms.
 
 **Run it locally.** The bootstrap admin token comes from an env var or a file, **never a CLI arg,
 and is never logged**.
@@ -253,20 +254,25 @@ services/mini-idp/server/build/install/server/bin/server --port 8455 --data-dir 
 **Architecture.** Two modules under base package `com.codeheadsystems.miniidp` (paths
 `:services:mini-idp:core/server`):
 
-- **`core`** — the IDP-specific identity layer, **no HTTP/transport code**. Owns the client
-  registry model (`model/ClientRecord`) and `service/ClientService`, Argon2id client-secret hashing
-  (`secret/*`), and the atomic-`0600` `store/JsonStore` (which implements mini-token's
-  `DocumentStore` SPI). The **token plane it used to own was extracted to `:libs:mini-token`** (see
-  below) and is consumed as an `api` dependency.
+- **`core`** — now just the atomic-`0600` `store/JsonStore` (which implements mini-token's
+  `DocumentStore` SPI), backing the signing-key / revocation / audit documents. The token plane was
+  extracted to `:libs:mini-token`; the client registry + Argon2 hashing moved to mini-directory. Both
+  are consumed as dependencies.
 - **`server`** — the HTTP daemon (`ServerMain`, JDK `com.sun.net.httpserver.HttpServer` on
-  loopback), router, handlers, config, and the OpenAPI spec + vendored Swagger UI. Depends on `core`.
+  loopback), router, handlers, config, the `directory/` package (the `ServiceAccountDirectory` SPI +
+  `HttpServiceAccountDirectory`/`InMemoryServiceAccountDirectory` + grant reassembly), and the
+  OpenAPI spec + vendored Swagger UI. Depends on `core`, mini-token, and mini-kms:client.
 
+- **Service accounts come from mini-directory.** At `/oauth/token`, mini-idp resolves the client via
+  the `ServiceAccountDirectory` SPI — production `HttpServiceAccountDirectory` POSTs to
+  mini-directory's `/admin/service-accounts/authenticate` (verification happens there; the secret
+  hash never leaves the directory), tests use `InMemoryServiceAccountDirectory`. The resolved grants
+  are reassembled into the per-key-group `grants` claim, so the token is identical to the old
+  registry's output. `--directory-url` + a directory admin token are required.
 - **The token plane lives in `mini-token`.** The Ed25519 keys, the hand-rolled JWS/JWT, the JWKS
   model, the `grants` claim, the auth model the claim maps onto, and the signing-key /
-  revocation / audit services are all in `:libs:mini-token` (`com.codeheadsystems.minitoken.*`) —
-  see the mini-token notes in the umbrella section above. mini-idp wires them together in
-  `server/IdpServer` and exposes them over HTTP; the issuer takes a `(subject, Authorization)`, so
-  `core` keeps its `ClientRecord` to itself.
+  revocation / audit services are all in `:libs:mini-token` (`com.codeheadsystems.minitoken.*`).
+  mini-idp wires them in `server/IdpServer`; the issuer takes a `(subject, Authorization)`.
 - **The token contract.** `server/src/main/resources/openapi.yaml` (served at `/openapi.yaml`,
   `/openapi.json`, `/docs`) is authoritative. The `grants` claim (mini-token's
   `token/GrantsClaim` over `auth/Authorization`) maps to mini-kms: `sub → Principal.id`,
@@ -319,9 +325,10 @@ services/mini-directory/build/install/mini-directory/bin/mini-directory --port 8
   `Group`, `Role`, the flat `GrantSpec` (`{action, resource}`, the JSON-friendly mirror of a
   mini-policy `Grant`), and `ResolvedPrincipal` (a mini-policy `Principal` + expanded `Grant`s).
 - **`service/DirectoryService`** — the I/O-free heart: CRUD for accounts/groups/roles, assignment,
-  `resolve(id)` (the role/group → grant expansion), and `authenticate(id, secret)` (no-oracle,
-  constant-time, dummy-hash for unknown — mirrors mini-idp's `ClientService`). All methods
-  `synchronized`; persisted on every mutation.
+  `resolve(id)` (the role/group → grant expansion), `authenticate(id, secret)` (no-oracle,
+  constant-time, dummy-hash for unknown — the family's credential-check pattern), and
+  `importServiceAccount(...)` (the migration entry point). All methods `synchronized`; persisted on
+  every mutation. mini-idp now reads service accounts from here (via the authenticate endpoint).
 - **`secret`** — `Argon2SecretHasher`/`SecretHash`/`Argon2Settings`: the family's Argon2id pattern
   (a `mini-common` candidate), **replicated** here so the service stays standalone. Only
   service accounts carry a hash; humans carry none.

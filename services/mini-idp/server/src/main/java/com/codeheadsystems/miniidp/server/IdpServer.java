@@ -1,10 +1,8 @@
 package com.codeheadsystems.miniidp.server;
 
-import com.codeheadsystems.miniidp.secret.Argon2SecretHasher;
+import com.codeheadsystems.miniidp.directory.ServiceAccountDirectory;
 import com.codeheadsystems.miniidp.server.http.Router;
-import com.codeheadsystems.miniidp.service.ClientService;
 import com.codeheadsystems.miniidp.store.JsonStore;
-import com.codeheadsystems.miniidp.store.StoreDocuments.ClientRegistry;
 import com.codeheadsystems.minikms.client.KmsSigningKeyStore;
 import com.codeheadsystems.minitoken.service.AuditService;
 import com.codeheadsystems.minitoken.service.RevocationService;
@@ -45,16 +43,18 @@ public final class IdpServer {
   }
 
   /**
-   * Build a server from configuration and a resolved admin token (signing keys stored plaintext).
+   * Build a server sourcing client identity from {@code directory} (signing keys stored plaintext).
    *
    * @param config     the resolved configuration.
    * @param adminToken the bootstrap admin token (already resolved from env/file by the caller).
+   * @param directory  the service-account source (mini-directory) used at token issuance.
    * @param clock      the clock shared by every time-dependent service.
    * @return a built, not-yet-started server.
    */
-  public static IdpServer create(final ServerConfig config, final String adminToken, final Clock clock)
+  public static IdpServer create(final ServerConfig config, final String adminToken,
+                                 final ServiceAccountDirectory directory, final Clock clock)
       throws IOException {
-    return create(config, adminToken, null, clock);
+    return create(config, adminToken, null, directory, clock);
   }
 
   /**
@@ -64,17 +64,14 @@ public final class IdpServer {
    * @param adminToken  the bootstrap admin token.
    * @param kmsApiToken the mini-kms data-plane API token (env/file-resolved by the caller), or null
    *                    to store signing keys plaintext-at-0600 (the default educational path).
+   * @param directory   the service-account source (mini-directory) used at token issuance.
    * @param clock       the clock shared by every time-dependent service.
    * @return a built, not-yet-started server.
    */
   public static IdpServer create(final ServerConfig config, final String adminToken,
-                                 final String kmsApiToken, final Clock clock) throws IOException {
+                                 final String kmsApiToken, final ServiceAccountDirectory directory,
+                                 final Clock clock) throws IOException {
     final RandomIds ids = new RandomIds();
-    final Argon2SecretHasher hasher = new Argon2SecretHasher(config.argonSettings());
-
-    final ClientService clients = new ClientService(
-        new JsonStore<>(config.dataDir().resolve("clients.json"), ClientRegistry.class),
-        hasher, ids, clock);
     final SigningKeyService signingKeys = new SigningKeyService(
         signingKeyStore(config, kmsApiToken),
         ids, clock, config.retiredKeyRetention());
@@ -85,7 +82,7 @@ public final class IdpServer {
 
     final TokenIssuer issuer = new TokenIssuer(
         signingKeys, ids, clock, config.issuer(), config.audience(), config.tokenTtl());
-    final ApiHandlers handlers = new ApiHandlers(config, clients, signingKeys, revocations, audit,
+    final ApiHandlers handlers = new ApiHandlers(config, directory, signingKeys, revocations, audit,
         issuer, new AdminAuthenticator(adminToken), OpenApiDocument.load(), clock);
     final Router router = handlers.router();
 

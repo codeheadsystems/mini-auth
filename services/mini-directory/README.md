@@ -69,9 +69,31 @@ All `/admin/**` endpoints require `Authorization: Bearer <admin-token>`. Full co
 | `POST /admin/groups` · `GET /admin/groups` · `GET/PUT/DELETE /admin/groups/{id}` | Group CRUD. |
 | `POST /admin/humans` | Create a human (operator-chosen id, no secret). |
 | `POST /admin/service-accounts` | Create a service account (generated id + **one-time** secret). |
+| `POST /admin/service-accounts/authenticate` | Verify a service-account secret and return its resolution — the read API a token issuer (mini-idp) calls. The secret is verified here; the hash never leaves. |
 | `GET /admin/principals` · `GET/DELETE /admin/principals/{id}` | List / read / delete accounts. |
 | `PUT /admin/principals/{id}/assignment` | Replace an account's enabled flag, admin capability, group memberships, roles, and direct grants. |
 | `GET /admin/principals/{id}/resolution` | Resolve to a mini-policy principal + effective grants. |
+
+## Migrating mini-idp's client registry
+
+mini-idp no longer keeps its own client registry — it reads service accounts from here. To bring
+existing mini-idp clients across, run the one-time migration, which turns each client record into a
+`SERVICE_ACCOUNT` (preserving its id, Argon2id secret hash, enabled flag, and grants — a key-group
+operation becomes a `{action: <KeyOperation>, resource: <keyGroup>}` grant, and the control flag
+becomes `admin`):
+
+```bash
+# Stop mini-idp first. Then, against the directory's data dir:
+java -cp services/mini-directory/build/install/mini-directory/lib/'*' \
+  com.codeheadsystems.minidirectory.migration.ClientRegistryMigration \
+  --clients-file ~/.mini-idp/clients.json --data-dir ~/.mini-directory
+# -> "Migrated N client(s) into …/directory.json; skipped M already present."
+```
+
+It is **idempotent** (a re-run skips ids already present), reads `clients.json` as plain JSON (no
+mini-idp dependency), and logs only ids + counts — never secrets. After migrating, point mini-idp at
+this directory with `--directory-url`; existing client secrets keep working (the hash is imported
+verbatim), and issued tokens are unchanged. Once verified, delete `clients.json`.
 
 ## Security notes
 

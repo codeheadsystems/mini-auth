@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.codeheadsystems.miniidp.directory.InMemoryServiceAccountDirectory;
 import com.codeheadsystems.minikms.auth.ApiTokenAuthenticator;
 import com.codeheadsystems.minikms.client.KmsClient;
 import com.codeheadsystems.minikms.client.KmsSigningKeyStore;
@@ -13,10 +14,10 @@ import com.codeheadsystems.minikms.kms.KmsService;
 import com.codeheadsystems.minikms.master.Argon2Settings;
 import com.codeheadsystems.minikms.server.KmsServer;
 import com.codeheadsystems.minipolicy.AllowAllPolicyEngine;
+import com.codeheadsystems.minitoken.auth.Authorization;
 import com.codeheadsystems.minitoken.jwks.JwkSet;
 import com.codeheadsystems.minitoken.service.TokenVerifier;
 import com.codeheadsystems.minitoken.store.TokenStoreDocuments.SigningKeys;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -35,9 +36,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The recursive integration, end to end through mini-idp: with {@code --kms-*} configured, the IDP's
- * signing keys are wrapped under a mini-kms key group (no plaintext on disk), yet token issuance and
- * offline JWKS verification still work.
+ * The recursive integration end to end through mini-idp: with {@code --kms-*} configured, the IDP's
+ * signing keys are wrapped under a mini-kms key group (no plaintext on disk), yet token issuance —
+ * sourcing identity from an in-memory directory — and offline JWKS verification still work.
  */
 class KmsBackedSigningTest {
 
@@ -46,6 +47,8 @@ class KmsBackedSigningTest {
   private static final String ADMIN_TOKEN = "idp-admin";
   private static final String KMS_API_TOKEN = "kms-data";
   private static final String KMS_ADMIN_TOKEN = "kms-admin";
+  private static final String CLIENT = "svc_kms";
+  private static final String SECRET = "kms-client-secret";
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private LocalKeyring keyring;
@@ -70,12 +73,13 @@ class KmsBackedSigningTest {
       admin.createKeyGroup("idp-signing");
     }
 
+    final InMemoryServiceAccountDirectory directory =
+        new InMemoryServiceAccountDirectory().add(CLIENT, SECRET, Authorization.none());
     final ServerConfig config = ServerConfig.resolve(new String[] {
         "--port", "0", "--data-dir", dataDir.toString(), "--issuer", ISSUER, "--audience", AUDIENCE,
-        "--kms-tcp", "127.0.0.1:" + kms.boundTcpPort(), "--kms-key-group", "idp-signing",
-        "--argon-memory-kib", "1024", "--argon-iterations", "1", "--argon-parallelism", "1"}, Map.of());
-    assertTrue(config.kmsEnabled(), "KMS wrapping should be enabled by --kms-* flags");
-    idp = IdpServer.create(config, ADMIN_TOKEN, KMS_API_TOKEN, Clock.systemUTC());
+        "--kms-tcp", "127.0.0.1:" + kms.boundTcpPort(), "--kms-key-group", "idp-signing"}, Map.of());
+    assertTrue(config.kmsEnabled());
+    idp = IdpServer.create(config, ADMIN_TOKEN, KMS_API_TOKEN, directory, Clock.systemUTC());
     idp.start();
     baseUrl = "http://127.0.0.1:" + idp.address().getPort();
     client = HttpClient.newHttpClient();
@@ -96,7 +100,6 @@ class KmsBackedSigningTest {
 
   @Test
   void signingKeysAreKmsWrappedYetTokensVerify() throws Exception {
-    // No plaintext signing key on disk: every stored private key is a mini-kms envelope.
     final SigningKeys onDisk = MAPPER.readValue(
         Files.readAllBytes(dataDir.resolve("signing-keys.json")), SigningKeys.class);
     assertFalse(onDisk.keys().isEmpty());
@@ -104,40 +107,21 @@ class KmsBackedSigningTest {
             .allMatch(k -> k.privatePkcs8Base64().startsWith(KmsSigningKeyStore.WRAPPED_PREFIX)),
         "every signing key must be wrapped under mini-kms on disk");
 
-    // Issue a token (the key is unwrapped in memory via mini-kms) and verify it offline via JWKS.
-    final Client registered = registerClient();
-    final String accessToken = MAPPER.readTree(
-        requestToken(registered.clientId, registered.secret).body()).get("access_token").asString();
-
+    final String accessToken = MAPPER.readTree(requestToken().body()).get("access_token").asString();
     final JwkSet jwks = MAPPER.readValue(get("/.well-known/jwks.json").body(), JwkSet.class);
     final TokenVerifier verifier = new TokenVerifier(ISSUER, AUDIENCE, Clock.systemUTC(), 5);
     assertTrue(verifier.verify(accessToken, jwks, jti -> false).valid(),
         "a token signed with a KMS-wrapped key verifies against the published JWKS");
 
-    // Rotation still works through the KMS store.
-    assertEquals(200, postJson("/admin/keys/rotate", "", ADMIN_TOKEN).statusCode());
-    final String afterRotation = MAPPER.readTree(
-        requestToken(registered.clientId, registered.secret).body()).get("access_token").asString();
+    assertEquals(200, postAdmin("/admin/keys/rotate").statusCode());
+    final String afterRotation = MAPPER.readTree(requestToken().body()).get("access_token").asString();
     final JwkSet rotatedJwks = MAPPER.readValue(get("/.well-known/jwks.json").body(), JwkSet.class);
     assertTrue(verifier.verify(afterRotation, rotatedJwks, jti -> false).valid());
     assertTrue(verifier.verify(accessToken, rotatedJwks, jti -> false).valid(), "old token still verifies");
   }
 
-  private record Client(String clientId, String secret) {
-  }
-
-  private Client registerClient() throws Exception {
-    final HttpResponse<String> response = postJson("/admin/clients",
-        "{\"authorization\":{\"control\":false,\"groups\":[]}}", ADMIN_TOKEN);
-    assertEquals(201, response.statusCode(), response.body());
-    final JsonNode body = MAPPER.readTree(response.body());
-    return new Client(body.get("clientId").asString(), body.get("secret").asString());
-  }
-
-  private HttpResponse<String> requestToken(final String clientId, final String secret) throws Exception {
-    final String form = "grant_type=client_credentials&client_id="
-        + java.net.URLEncoder.encode(clientId, StandardCharsets.UTF_8)
-        + "&client_secret=" + java.net.URLEncoder.encode(secret, StandardCharsets.UTF_8);
+  private HttpResponse<String> requestToken() throws Exception {
+    final String form = "grant_type=client_credentials&client_id=" + CLIENT + "&client_secret=" + SECRET;
     return client.send(HttpRequest.newBuilder(URI.create(baseUrl + "/oauth/token"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .POST(BodyPublishers.ofString(form)).build(), BodyHandlers.ofString());
@@ -148,10 +132,9 @@ class KmsBackedSigningTest {
         BodyHandlers.ofString());
   }
 
-  private HttpResponse<String> postJson(final String path, final String body, final String token)
-      throws Exception {
+  private HttpResponse<String> postAdmin(final String path) throws Exception {
     return client.send(HttpRequest.newBuilder(URI.create(baseUrl + path))
-        .header("Content-Type", "application/json").header("Authorization", "Bearer " + token)
-        .POST(BodyPublishers.ofString(body)).build(), BodyHandlers.ofString());
+        .header("Authorization", "Bearer " + ADMIN_TOKEN)
+        .POST(BodyPublishers.ofString("")).build(), BodyHandlers.ofString());
   }
 }

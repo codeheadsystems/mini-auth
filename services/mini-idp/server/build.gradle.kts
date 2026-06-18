@@ -23,6 +23,8 @@ dependencies {
     testImplementation(project(":services:mini-kms:server"))
     testImplementation(project(":services:mini-kms:core"))
     testImplementation(project(":libs:mini-policy"))
+    // Boot a real mini-directory in the end-to-end "sourcing identity from mini-directory" test.
+    testImplementation(project(":services:mini-directory"))
     testImplementation(libs.jackson.databind)
     testImplementation(libs.jackson.yaml)
     // JUnit 5 (jupiter + launcher) is supplied by the convention plugin.
