@@ -22,6 +22,9 @@ import java.util.List;
  * @param used       whether this token has already been rotated (a second use is a replay).
  * @param revoked    whether this token (or its family) has been revoked.
  * @param expiresAt  expiry (epoch seconds).
+ * @param authTime   when the human originally authenticated (epoch seconds), carried unchanged
+ *                   across rotations so a refreshed ID token's {@code auth_time} reflects the real
+ *                   login — not the refresh — keeping client max-age / re-auth checks honest.
  */
 public record RefreshTokenRecord(
     String id,
@@ -32,7 +35,8 @@ public record RefreshTokenRecord(
     List<String> scopes,
     boolean used,
     boolean revoked,
-    long expiresAt) {
+    long expiresAt,
+    long authTime) {
 
   public RefreshTokenRecord {
     scopes = scopes == null ? List.of() : List.copyOf(scopes);
@@ -40,11 +44,11 @@ public record RefreshTokenRecord(
 
   /** @return a copy marked used (rotated). */
   public RefreshTokenRecord markUsed() {
-    return new RefreshTokenRecord(id, secretHash, familyId, clientId, subject, scopes, true, revoked, expiresAt);
+    return new RefreshTokenRecord(id, secretHash, familyId, clientId, subject, scopes, true, revoked, expiresAt, authTime);
   }
 
   /** @return a copy marked revoked. */
   public RefreshTokenRecord revoke() {
-    return new RefreshTokenRecord(id, secretHash, familyId, clientId, subject, scopes, used, true, expiresAt);
+    return new RefreshTokenRecord(id, secretHash, familyId, clientId, subject, scopes, used, true, expiresAt, authTime);
   }
 }

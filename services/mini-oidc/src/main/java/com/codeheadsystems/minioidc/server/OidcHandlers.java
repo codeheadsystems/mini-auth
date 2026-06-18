@@ -150,7 +150,7 @@ public final class OidcHandlers {
     doc.put("id_token_signing_alg_values_supported", List.of("EdDSA"));
     doc.put("token_endpoint_auth_methods_supported",
         List.of("client_secret_basic", "client_secret_post", "none"));
-    doc.put("code_challenge_methods_supported", List.of(Pkce.METHOD_S256, Pkce.METHOD_PLAIN));
+    doc.put("code_challenge_methods_supported", List.of(Pkce.METHOD_S256));
     return HttpResponse.json(200, doc);
   }
 
@@ -179,9 +179,10 @@ public final class OidcHandlers {
       return errorRedirect(redirectUri, "invalid_scope", state);
     }
     final String challenge = q.get("code_challenge");
-    final String method = q.getOrDefault("code_challenge_method", Pkce.METHOD_PLAIN);
+    final String method = q.getOrDefault("code_challenge_method", Pkce.METHOD_S256);
     if (challenge == null || challenge.isBlank() || !Pkce.isSupportedMethod(method)) {
-      // PKCE is mandatory for every authorization-code request.
+      // PKCE is mandatory for every authorization-code request, and only S256 is accepted
+      // (an explicit `plain` method is rejected here rather than silently weakening the flow).
       return errorRedirect(redirectUri, "invalid_request", state);
     }
 
@@ -319,7 +320,7 @@ public final class OidcHandlers {
         .orElse(new DirectoryUser(code.subject(), false, List.of(), null, null, false));
     final OidcTokens.AccessToken access = tokens.mintAccessToken(code.subject(), client.clientId(), code.scopes());
     final String idToken = tokens.mintIdToken(user, client.clientId(), code.nonce(), code.authTime(), code.scopes());
-    final String refresh = refreshTokens.issue(client.clientId(), code.subject(), code.scopes());
+    final String refresh = refreshTokens.issue(client.clientId(), code.subject(), code.scopes(), code.authTime());
     codes.bindFamily(codeValue, refresh.substring(0, refresh.indexOf('.')));
     return tokenResponse(access, idToken, refresh, code.scopes());
   }
@@ -330,7 +331,9 @@ public final class OidcHandlers {
     final DirectoryUser user = directory.resolve(rotated.subject())
         .orElse(new DirectoryUser(rotated.subject(), false, List.of(), null, null, false));
     final OidcTokens.AccessToken access = tokens.mintAccessToken(rotated.subject(), client.clientId(), rotated.scopes());
-    final String idToken = tokens.mintIdToken(user, client.clientId(), null, clock.instant().getEpochSecond(), rotated.scopes());
+    // auth_time must reflect the ORIGINAL human authentication, not this refresh — otherwise a
+    // client's max-age / re-authentication check is silently defeated. It is carried in the family.
+    final String idToken = tokens.mintIdToken(user, client.clientId(), null, rotated.authTime(), rotated.scopes());
     return tokenResponse(access, idToken, rotated.wireToken(), rotated.scopes());
   }
 
@@ -407,8 +410,13 @@ public final class OidcHandlers {
     final String sessionId = ctx.cookie(Cookies.SESSION);
     currentSession(ctx).ifPresent(session -> refreshTokens.revokeForSubject(session.subject()));
     sessions.destroy(sessionId);
+    // RP-initiated logout: only redirect to a post_logout_redirect_uri that is registered for the
+    // client named by client_id. An unvalidated redirect from the OP origin would be an open
+    // redirect (a phishing primitive); anything unrecognized falls back to a plain JSON response.
     final String postLogout = ctx.queryParam("post_logout_redirect_uri");
-    final HttpResponse cleared = (postLogout != null && !postLogout.isBlank())
+    final boolean allowed = postLogout != null && !postLogout.isBlank()
+        && clients.get(ctx.queryParam("client_id")).map(c -> c.allowsRedirect(postLogout)).orElse(false);
+    final HttpResponse cleared = allowed
         ? HttpResponse.redirect(postLogout)
         : HttpResponse.json(200, Map.of("status", "logged_out"));
     return cleared.header("Set-Cookie", cookies.clearSession());

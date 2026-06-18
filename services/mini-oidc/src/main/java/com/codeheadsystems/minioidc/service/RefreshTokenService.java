@@ -38,9 +38,10 @@ public final class RefreshTokenService {
    *
    * @return the {@code id.secret} wire value to hand the client (only its hash is stored).
    */
-  public synchronized String issue(final String clientId, final String subject, final List<String> scopes) {
+  public synchronized String issue(final String clientId, final String subject, final List<String> scopes,
+                                   final long authTime) {
     final String id = tokens.newRefreshId();
-    return mint(id, id, clientId, subject, scopes);
+    return mint(id, id, clientId, subject, scopes, authTime);
   }
 
   /**
@@ -74,8 +75,9 @@ public final class RefreshTokenService {
     }
     byId.put(id, record.markUsed());
     final String successor = tokens.newRefreshId();
-    final String wire = mint(successor, record.familyId(), record.clientId(), record.subject(), record.scopes());
-    return Optional.of(new Rotated(wire, record.subject(), record.scopes()));
+    final String wire = mint(successor, record.familyId(), record.clientId(), record.subject(),
+        record.scopes(), record.authTime());
+    return Optional.of(new Rotated(wire, record.subject(), record.scopes(), record.authTime()));
   }
 
   /** Revoke every token in a family (replay response). */
@@ -89,10 +91,10 @@ public final class RefreshTokenService {
   }
 
   private String mint(final String id, final String familyId, final String clientId,
-                      final String subject, final List<String> scopes) {
+                      final String subject, final List<String> scopes, final long authTime) {
     final String secret = tokens.newRefreshSecret();
     byId.put(id, new RefreshTokenRecord(id, Tokens.sha256(secret), familyId, clientId, subject,
-        scopes, false, false, clock.instant().getEpochSecond() + ttl.toSeconds()));
+        scopes, false, false, clock.instant().getEpochSecond() + ttl.toSeconds(), authTime));
     return id + "." + secret;
   }
 
@@ -102,7 +104,8 @@ public final class RefreshTokenService {
    * @param wireToken the new refresh token to return to the client.
    * @param subject   the principal the token is for.
    * @param scopes    the scopes carried forward.
+   * @param authTime  the original human authentication time (epoch seconds), carried unchanged.
    */
-  public record Rotated(String wireToken, String subject, List<String> scopes) {
+  public record Rotated(String wireToken, String subject, List<String> scopes, long authTime) {
   }
 }

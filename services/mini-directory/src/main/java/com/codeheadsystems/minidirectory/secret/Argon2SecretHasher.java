@@ -69,6 +69,26 @@ public final class Argon2SecretHasher {
   }
 
   /**
+   * A fixed, well-formed hash carrying <em>this hasher's</em> configured cost parameters, for
+   * constant-effort dummy verification of unknown / secretless lookups. {@link #verify} against it
+   * performs the same Argon2id work a real hash would, so an attacker cannot tell an existing
+   * service account from an unknown id by timing. Its salt and hash are all-zero and no real secret
+   * ever hashes to it, so it authenticates nothing — it exists only to spend the time.
+   *
+   * @return a throwaway hash with the configured memory/iteration/parallelism cost.
+   */
+  public SecretHash dummyHash() {
+    final Base64.Encoder b64 = Base64.getEncoder();
+    return new SecretHash(
+        SecretHash.ALGORITHM_ARGON2ID,
+        b64.encodeToString(new byte[SALT_LENGTH_BYTES]),
+        b64.encodeToString(new byte[HASH_LENGTH_BYTES]),
+        settings.memoryKiB(),
+        settings.iterations(),
+        settings.parallelism());
+  }
+
+  /**
    * Verify a presented secret against a stored hash in constant time.
    *
    * @param presented the secret presented by the client (not mutated; caller should zero it).

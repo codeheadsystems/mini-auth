@@ -23,8 +23,12 @@ class PkceTest {
   }
 
   @Test
-  void plainMethodComparesVerbatim() {
-    assertTrue(Pkce.verify(Pkce.METHOD_PLAIN, "abc", "abc"));
-    assertFalse(Pkce.verify(Pkce.METHOD_PLAIN, "abc", "abd"));
+  void plainMethodIsRejected() {
+    // S256 is mandatory: `plain` (and any non-S256 / null method) must never satisfy a challenge,
+    // even when the verifier equals the challenge verbatim.
+    assertFalse(Pkce.verify("plain", "abc", "abc"));
+    assertFalse(Pkce.verify(null, "abc", "abc"));
+    assertFalse(Pkce.isSupportedMethod("plain"));
+    assertTrue(Pkce.isSupportedMethod(Pkce.METHOD_S256));
   }
 }

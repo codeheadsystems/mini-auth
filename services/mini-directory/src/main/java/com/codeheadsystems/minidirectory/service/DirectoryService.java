@@ -44,6 +44,7 @@ public final class DirectoryService {
 
   private final JsonStore<DirectoryDocument> store;
   private final Argon2SecretHasher hasher;
+  private final SecretHash dummyHash;
   private final RandomIds ids;
   private final Map<String, Account> accounts = new LinkedHashMap<>();
   private final Map<String, Group> groups = new LinkedHashMap<>();
@@ -58,6 +59,8 @@ public final class DirectoryService {
                           final RandomIds ids) {
     this.store = store;
     this.hasher = hasher;
+    // Built from the hasher's configured cost so a dummy verify costs the same as a real one.
+    this.dummyHash = hasher.dummyHash();
     this.ids = ids;
     if (store.exists()) {
       final DirectoryDocument loaded = store.load();
@@ -303,12 +306,15 @@ public final class DirectoryService {
     final Account account = id == null ? null : accounts.get(id);
     if (account == null || account.kind() != PrincipalKind.SERVICE_ACCOUNT
         || account.secretHash() == null) {
-      // Spend comparable effort on a dummy verification so timing does not reveal existence/kind.
-      hasher.verify(secret, DUMMY_HASH);
+      // Spend the same Argon2 effort on a dummy verification so timing does not reveal
+      // existence/kind. The dummy carries the hasher's real cost parameters (see dummyHash()).
+      hasher.verify(secret, dummyHash);
       return Optional.empty();
     }
-    final boolean ok = account.enabled() && hasher.verify(secret, account.secretHash());
-    return ok ? Optional.of(account) : Optional.empty();
+    // Always run the (expensive) verify before consulting enabled(), so a disabled account is not
+    // distinguishable from a wrong secret by timing either.
+    final boolean secretOk = hasher.verify(secret, account.secretHash());
+    return (account.enabled() && secretOk) ? Optional.of(account) : Optional.empty();
   }
 
   // ---- Resolution (the reason the directory exists) ------------------------------------------
@@ -391,11 +397,4 @@ public final class DirectoryService {
   public record Registration(Account account, char[] secret) {
   }
 
-  // A fixed, well-formed hash used only to keep timing uniform for unknown/secretless lookups. Its
-  // parameters are tiny on purpose; it never authenticates anything (no secret hashes to it).
-  private static final SecretHash DUMMY_HASH = new SecretHash(
-      SecretHash.ALGORITHM_ARGON2ID,
-      "AAAAAAAAAAAAAAAAAAAAAA==",
-      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-      8, 1, 1);
 }

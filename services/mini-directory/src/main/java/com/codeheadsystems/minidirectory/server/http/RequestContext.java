@@ -17,6 +17,9 @@ import java.util.Map;
  */
 public final class RequestContext {
 
+  /** Hard cap on a request body we will buffer (1 MiB) — bounds memory per request. */
+  private static final int MAX_BODY_BYTES = 1 << 20;
+
   private final HttpExchange exchange;
   private final Map<String, String> pathParams;
   private byte[] cachedBody;
@@ -40,7 +43,15 @@ public final class RequestContext {
   public byte[] body() {
     if (cachedBody == null) {
       try {
-        cachedBody = exchange.getRequestBody().readAllBytes();
+        // Bounded read: never buffer more than the cap, so an oversized (or slow-trickled) body
+        // cannot exhaust the heap. readNBytes(cap + 1) stops at cap + 1 bytes; if we got that
+        // many, the body is over the limit and we reject it before parsing.
+        final byte[] read = exchange.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
+        if (read.length > MAX_BODY_BYTES) {
+          throw new ApiException(413, "payload_too_large",
+              "request body exceeds the " + MAX_BODY_BYTES + "-byte limit");
+        }
+        cachedBody = read;
       } catch (final IOException e) {
         throw new UncheckedIOException(e);
       }

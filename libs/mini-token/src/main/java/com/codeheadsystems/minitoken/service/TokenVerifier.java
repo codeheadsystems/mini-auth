@@ -63,6 +63,13 @@ public final class TokenVerifier {
       return Result.failure(FailureReason.BAD_FORMAT);
     }
 
+    // Pin the algorithm two ways: we only ever verify with an Ed25519 key (selected by kid), AND we
+    // reject any header that does not declare EdDSA. Never let the token's own `alg` choose the
+    // verification algorithm — that is the classic JOSE alg-confusion footgun (e.g. `alg: none`).
+    if (!JwsHeader.ALG_EDDSA.equals(header.algorithm())) {
+      return Result.failure(FailureReason.BAD_ALGORITHM);
+    }
+
     final PublicKey publicKey = publicKeyFor(jwkSet, header.keyId());
     if (publicKey == null) {
       return Result.failure(FailureReason.UNKNOWN_KID);
@@ -114,6 +121,8 @@ public final class TokenVerifier {
   public enum FailureReason {
     /** Not a well-formed compact JWS / claims JSON. */
     BAD_FORMAT,
+    /** The header's {@code alg} is not {@code EdDSA}. */
+    BAD_ALGORITHM,
     /** No published key matches the token's {@code kid}. */
     UNKNOWN_KID,
     /** The Ed25519 signature did not verify. */

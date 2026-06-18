@@ -31,10 +31,25 @@ public record RouteRule(String pathPrefix, List<String> methods, RouteAccess acc
 
   /** @return whether this rule covers the given request method + path. */
   public boolean matches(final String method, final String path) {
-    if (!path.startsWith(pathPrefix)) {
+    if (!pathCovers(path)) {
       return false;
     }
     return methods.isEmpty() || methods.contains(method.toUpperCase(Locale.ROOT));
+  }
+
+  /**
+   * Segment-aware prefix match: {@code /admin} covers {@code /admin} and {@code /admin/x} but NOT
+   * {@code /admin-public}. A raw {@code startsWith} would over-match the latter and silently widen
+   * a rule's reach. {@code "/"} is the catch-all. The request path is assumed already canonicalized
+   * (see {@code GatewayHandlers.normalizePath}).
+   */
+  private boolean pathCovers(final String path) {
+    if ("/".equals(pathPrefix)) {
+      return true;
+    }
+    final String prefix = pathPrefix.endsWith("/")
+        ? pathPrefix.substring(0, pathPrefix.length() - 1) : pathPrefix;
+    return path.equals(prefix) || path.startsWith(prefix + "/");
   }
 
   /** A catch-all rule requiring any authenticated caller — the default when none is configured. */

@@ -47,6 +47,16 @@ class RoutePolicyTest {
   }
 
   @Test
+  void prefixMatchIsSegmentAwareNotSubstring() {
+    // "/admin-public" must NOT be covered by the "/admin" SCOPE rule (a raw startsWith would have
+    // over-matched it); it falls through to the catch-all AUTHENTICATED rule instead.
+    assertEquals(Outcome.ALLOW, policy.evaluate("GET", "/admin-public", Optional.of(user("openid"))));
+    // The real /admin subtree still defers to the scope rule.
+    assertEquals(Outcome.FORBIDDEN, policy.evaluate("GET", "/admin", Optional.of(user("openid"))));
+    assertEquals(Outcome.FORBIDDEN, policy.evaluate("GET", "/admin/x", Optional.of(user("openid"))));
+  }
+
+  @Test
   void unmatchedRequestIsDeniedByDefault() {
     final RoutePolicy empty = new RoutePolicy(new GatewayRoutes(List.of(
         new RouteRule("/known", null, RouteAccess.PUBLIC, null))));

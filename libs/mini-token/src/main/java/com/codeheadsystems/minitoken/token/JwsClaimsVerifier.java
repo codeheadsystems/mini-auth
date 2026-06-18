@@ -49,6 +49,12 @@ public final class JwsClaimsVerifier {
     } catch (final RuntimeException e) {
       return Optional.empty();
     }
+    // Pin the algorithm two ways: we only ever verify with an Ed25519 key (selected by kid), AND we
+    // reject any header that does not declare EdDSA. Never let the token's own `alg` choose the
+    // verification algorithm — that is the classic JOSE alg-confusion footgun (e.g. `alg: none`).
+    if (!JwsHeader.ALG_EDDSA.equals(header.algorithm())) {
+      return Optional.empty();
+    }
     final PublicKey key = publicKeyFor(jwkSet, header.keyId());
     if (key == null || !Jws.verifySignature(parts, key)) {
       return Optional.empty();

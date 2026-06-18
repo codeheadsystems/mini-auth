@@ -7,8 +7,11 @@ import com.codeheadsystems.minigateway.server.http.HttpResponse;
 import com.codeheadsystems.minigateway.server.http.RequestContext;
 import com.codeheadsystems.minigateway.server.http.Router;
 import com.codeheadsystems.minigateway.service.RoutePolicy;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Map;
 import java.util.Optional;
 
@@ -68,7 +71,13 @@ public final class GatewayHandlers {
   private HttpResponse verify(final RequestContext ctx) {
     final String method = forwarded(ctx, "X-Forwarded-Method", "X-Original-Method", "GET");
     final String uri = forwarded(ctx, "X-Forwarded-Uri", "X-Original-URI", "/");
-    final String path = pathOf(uri);
+    final String path = normalizePath(pathOf(uri));
+    if (path == null) {
+      // A path we cannot safely canonicalize (traversal above root, undecodable, NUL) must never
+      // be matched against a rule — a hostile `/public/../admin` could otherwise dodge the prefix
+      // check and fall through to a permissive rule. Deny outright.
+      return HttpResponse.json(403, Map.of("error", "forbidden"));
+    }
 
     final Optional<AuthenticatedUser> user = authenticate(ctx);
     final RoutePolicy.Outcome outcome = policy.evaluate(method, path, user);
@@ -91,15 +100,15 @@ public final class GatewayHandlers {
   }
 
   private HttpResponse allow(final Optional<AuthenticatedUser> user) {
-    HttpResponse response = HttpResponse.json(200, Map.of("allow", true));
-    if (user.isPresent()) {
-      final AuthenticatedUser caller = user.get();
-      response = response
-          .header(HEADER_SUBJECT, caller.subject())
-          .header(HEADER_SCOPE, String.join(" ", caller.scopes()))
-          .header(HEADER_SOURCE, caller.source());
-    }
-    return response;
+    final AuthenticatedUser caller = user.orElse(null);
+    // Always emit the identity headers (empty when there is no authenticated caller — e.g. a PUBLIC
+    // route) so a proxy configured to copy them onto the upstream OVERWRITES, never passes through,
+    // any client-supplied X-Auth-* value. The proxy must still be configured to set these from our
+    // response and to strip the client's own copies.
+    return HttpResponse.json(200, Map.of("allow", true))
+        .header(HEADER_SUBJECT, caller == null ? "" : caller.subject())
+        .header(HEADER_SCOPE, caller == null ? "" : String.join(" ", caller.scopes()))
+        .header(HEADER_SOURCE, caller == null ? "" : caller.source());
   }
 
   private HttpResponse unauthenticated(final RequestContext ctx, final String uri) {
@@ -139,6 +148,45 @@ public final class GatewayHandlers {
   private static String pathOf(final String uri) {
     final int q = uri.indexOf('?');
     return q < 0 ? uri : uri.substring(0, q);
+  }
+
+  /**
+   * Canonicalize a request path before route matching: percent-decode once (preserving a literal
+   * {@code +}), then collapse {@code //}, {@code .} and {@code ..} segments. Returns {@code null}
+   * for anything that cannot be safely canonicalized — a traversal above root, an undecodable
+   * escape, or an embedded NUL — so the caller can refuse it. Decoding once (never twice) means an
+   * upstream that also normalizes once sees the same path we matched, closing path-confusion gaps.
+   */
+  static String normalizePath(final String rawPath) {
+    if (rawPath == null || rawPath.isBlank()) {
+      return "/";
+    }
+    final String decoded;
+    try {
+      // Protect a literal '+' (URLDecoder would turn it into a space, which is wrong for a path),
+      // then decode %XX exactly once.
+      decoded = URLDecoder.decode(rawPath.replace("+", "%2B"), StandardCharsets.UTF_8);
+    } catch (final RuntimeException e) {
+      return null;
+    }
+    if (decoded.indexOf('\0') >= 0) {
+      return null;
+    }
+    final Deque<String> segments = new ArrayDeque<>();
+    for (final String segment : decoded.split("/", -1)) {
+      if (segment.isEmpty() || ".".equals(segment)) {
+        continue;
+      }
+      if ("..".equals(segment)) {
+        if (segments.isEmpty()) {
+          return null; // traversal above root
+        }
+        segments.removeLast();
+      } else {
+        segments.addLast(segment);
+      }
+    }
+    return "/" + String.join("/", segments);
   }
 
   private static String firstNonBlank(final String... values) {
