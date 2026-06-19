@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>mini-auth — readable, educational auth &amp; identity services</title>
+  <meta name="description" content="A monorepo family of small, single-responsibility authentication and authorization services in Java — KMS, OpenID Provider, forward-auth gateway, directory, internal CA, and the shared token/policy libraries. Built to be read, and to teach how auth actually works.">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e2e4e9;
+      --muted: #9ca0ab;
+      --accent: #6c8cff;
+      --accent-hover: #8da6ff;
+      --green: #4ade80;
+      --red: #f87171;
+      --amber: #fbbf24;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); text-decoration: underline; }
+    code {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 0.9em;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    }
+    pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      overflow-x: auto;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 0.85em;
+      line-height: 1.5;
+    }
+
+    /* Layout */
+    .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+    /* Hero */
+    .hero {
+      padding: 80px 0 60px;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+    }
+    .hero h1 {
+      font-size: 2.5em;
+      font-weight: 700;
+      margin-bottom: 12px;
+      letter-spacing: -0.02em;
+    }
+    .hero .tagline {
+      font-size: 1.25em;
+      color: var(--muted);
+      max-width: 680px;
+      margin: 0 auto 32px;
+    }
+    .badges {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 32px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.8em;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .cta-row {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .cta {
+      display: inline-block;
+      padding: 12px 28px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 1em;
+      transition: background 0.2s;
+    }
+    .cta-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .cta-primary:hover { background: var(--accent-hover); text-decoration: none; }
+    .cta-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .cta-secondary:hover { background: var(--border); text-decoration: none; }
+
+    /* Sections */
+    section { padding: 60px 0; border-bottom: 1px solid var(--border); }
+    section:last-child { border-bottom: none; }
+    section h2 {
+      font-size: 1.6em;
+      margin-bottom: 24px;
+      letter-spacing: -0.01em;
+    }
+    section h3 {
+      font-size: 1.15em;
+      margin: 28px 0 12px;
+      color: var(--text);
+    }
+    section p { margin-bottom: 16px; color: var(--muted); }
+    section p strong { color: var(--text); }
+
+    /* Problem/Solution grid */
+    .comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin: 24px 0;
+    }
+    @media (max-width: 640px) {
+      .comparison { grid-template-columns: 1fr; }
+      .hero h1 { font-size: 1.8em; }
+    }
+    .comparison-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .comparison-card h3 {
+      margin: 0 0 16px;
+      font-size: 1.1em;
+    }
+    .comparison-card ul {
+      list-style: none;
+      padding: 0;
+    }
+    .comparison-card ul li {
+      padding: 6px 0;
+      color: var(--muted);
+      padding-left: 24px;
+      position: relative;
+    }
+    .comparison-card ul li::before {
+      position: absolute;
+      left: 0;
+      font-weight: bold;
+    }
+    .card-problem ul li::before { content: "x"; color: var(--red); }
+    .card-solution ul li::before { content: "+"; color: var(--green); }
+
+    /* Feature list */
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin: 24px 0;
+    }
+    @media (max-width: 640px) { .features { grid-template-columns: 1fr; } }
+    .feature {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .feature h4 {
+      font-size: 1em;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    .feature p { font-size: 0.9em; margin: 0; }
+
+    /* Architecture diagram */
+    .protocol-diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px;
+      margin: 24px 0;
+    }
+    .protocol-diagram h3 { margin-top: 0; }
+    .protocol-diagram pre {
+      background: transparent;
+      border: none;
+      padding: 0;
+      margin: 12px 0 0;
+      color: var(--muted);
+    }
+
+    /* Quick start */
+    .quickstart-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: -1px;
+      position: relative;
+      z-index: 1;
+    }
+    .quickstart-tab {
+      padding: 10px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.9em;
+      font-weight: 600;
+    }
+    .quickstart-tab.active {
+      background: var(--surface);
+      color: var(--text);
+      border-bottom: 1px solid var(--surface);
+    }
+    .quickstart-content { display: none; }
+    .quickstart-content.active { display: block; }
+    .quickstart-content pre {
+      border-radius: 0 8px 8px 8px;
+      margin: 0 0 16px;
+    }
+    .quickstart-content p { margin-top: 16px; }
+
+    /* Links section */
+    .link-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin: 24px 0;
+    }
+    @media (max-width: 640px) { .link-grid { grid-template-columns: 1fr; } }
+    .link-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      transition: border-color 0.2s;
+    }
+    .link-card:hover { border-color: var(--accent); text-decoration: none; }
+    .link-card h4 { color: var(--text); margin-bottom: 8px; }
+    .link-card p { color: var(--muted); font-size: 0.85em; margin: 0; }
+
+    /* Footer */
+    footer {
+      padding: 40px 0;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85em;
+    }
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="container">
+      <h1>mini-auth</h1>
+      <p class="tagline">
+        A family of small, single-responsibility auth &amp; identity services you can actually
+        <em>read</em>. Educational, but homelab-functional — real crypto, heavily commented, and
+        built to teach how authentication and authorization actually work.
+      </p>
+      <div class="badges">
+        <span class="badge">Java 21</span>
+        <span class="badge">OAuth 2.0</span>
+        <span class="badge">OpenID Connect</span>
+        <span class="badge">WebAuthn / passkeys</span>
+        <span class="badge">mTLS</span>
+        <span class="badge">JOSE / JWT</span>
+        <span class="badge">MIT License</span>
+      </div>
+      <div class="cta-row">
+        <a class="cta cta-primary" href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/TEACHING.md">Start learning &rarr;</a>
+        <a class="cta cta-secondary" href="https://github.com/codeheadsystems/mini-auth">GitHub Repository</a>
+        <a class="cta cta-secondary" href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/DIRECTION.md">Architecture map</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- What is mini-auth -->
+  <section>
+    <div class="container">
+      <h2>What is mini-auth?</h2>
+      <p>
+        mini-auth is a <strong>monorepo</strong> for a family of small auth/identity pieces. Each
+        "mini" is either a <strong>library</strong> (focused machinery — a token plane, a policy
+        decision function) or a <strong>service</strong> (a thin deployable front door — an OpenID
+        Provider, a forward-auth gateway, an internal CA). They compose into a working self-hosted
+        auth stack, and <strong>one <code>./gradlew build</code></strong> compiles and tests the
+        whole family.
+      </p>
+      <p>
+        The crypto is real and built on vetted constructions (Ed25519, AES-256-GCM, Argon2id,
+        PKCE, WebAuthn) — but the project is <strong>educational and explicitly not audited</strong>.
+        The point is that the code is meant to be read, and that each service demonstrates a security
+        principle in isolation.
+      </p>
+      <div class="comparison">
+        <div class="comparison-card card-problem">
+          <h3>Auth as a black box</h3>
+          <ul>
+            <li>Identity providers are opaque — you configure them, never see how they work</li>
+            <li>"JWT" is a string you copy around without understanding what's signed</li>
+            <li>Properties like no-oracle, constant-time compare, deny-by-default stay invisible</li>
+            <li>Learning means wading through huge, production-hardened codebases</li>
+          </ul>
+        </div>
+        <div class="comparison-card card-solution">
+          <h3>mini-auth</h3>
+          <ul>
+            <li>Every service is small and heavily commented — written to be read</li>
+            <li>Build and verify a token by hand, then flip one byte and watch it fail</li>
+            <li>Each mini isolates one principle: envelope encryption, forward-auth trust, &hellip;</li>
+            <li>Runs a real self-hosted SSO + gateway + CA on your homelab</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- The family -->
+  <section>
+    <div class="container">
+      <h2>The family at a glance</h2>
+      <p>
+        Six deployable services and two shared libraries ship and run. Only <code>mini-console</code>
+        is a roadmap placeholder. <a href="https://github.com/codeheadsystems/pk-auth">pk-auth</a> is
+        an external passkeys library, embedded by mini-oidc.
+      </p>
+      <div style="overflow-x:auto; margin:24px 0;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
+          <thead>
+            <tr style="border-bottom:2px solid var(--border); text-align:left;">
+              <th style="padding:12px 16px; color:var(--text);">Component</th>
+              <th style="padding:12px 16px; color:var(--text);">Role</th>
+              <th style="padding:12px 16px; color:var(--text);">Type</th>
+              <th style="padding:12px 16px; color:var(--text);">Status</th>
+            </tr>
+          </thead>
+          <tbody style="color:var(--muted);">
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;"><a href="https://github.com/codeheadsystems/mini-auth/tree/main/services/mini-kms">mini-kms</a></td>
+              <td style="padding:12px 16px;">Envelope-encryption KMS — the vault that wraps other services' signing keys.</td>
+              <td style="padding:12px 16px;">service</td>
+              <td style="padding:12px 16px; color:var(--green);">shipping</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;"><a href="https://github.com/codeheadsystems/mini-auth/tree/main/services/mini-idp">mini-idp</a></td>
+              <td style="padding:12px 16px;">Machine identity — OAuth2 client-credentials &rarr; Ed25519 JWT + JWKS.</td>
+              <td style="padding:12px 16px;">service</td>
+              <td style="padding:12px 16px; color:var(--green);">shipping</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;"><a href="https://github.com/codeheadsystems/mini-auth/tree/main/services/mini-oidc">mini-oidc</a></td>
+              <td style="padding:12px 16px;">Human SSO / OpenID Provider — auth-code + PKCE, passkeys (embeds pk-auth).</td>
+              <td style="padding:12px 16px;">service</td>
+              <td style="padding:12px 16px; color:var(--green);">shipping</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;"><a href="https://github.com/codeheadsystems/mini-auth/tree/main/services/mini-gateway">mini-gateway</a></td>
+              <td style="padding:12px 16px;">Forward-auth endpoint for a reverse proxy (Traefik / Caddy / nginx).</td>
+              <td style="padding:12px 16px;">service</td>
+              <td style="padding:12px 16px; color:var(--green);">shipping</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;"><a href="https://github.com/codeheadsystems/mini-auth/tree/main/services/mini-directory">mini-directory</a></td>
+              <td style="padding:12px 16px;">Identity source of truth — humans, service accounts, groups, roles, grants.</td>
+              <td style="padding:12px 16px;">service</td>
+              <td style="padding:12px 16px; color:var(--green);">shipping</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;"><a href="https://github.com/codeheadsystems/mini-auth/tree/main/services/mini-ca">mini-ca</a></td>
+              <td style="padding:12px 16px;">Internal CA for mTLS / workload identity — CA key wrapped under mini-kms.</td>
+              <td style="padding:12px 16px;">service</td>
+              <td style="padding:12px 16px; color:var(--green);">shipping</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;"><a href="https://github.com/codeheadsystems/mini-auth/tree/main/libs/mini-token">mini-token</a></td>
+              <td style="padding:12px 16px;">Shared token plane — JWS, JWKS, rotation, revocation, audit, SSO sessions.</td>
+              <td style="padding:12px 16px;">library</td>
+              <td style="padding:12px 16px; color:var(--green);">shipping</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;"><a href="https://github.com/codeheadsystems/mini-auth/tree/main/libs/mini-policy">mini-policy</a></td>
+              <td style="padding:12px 16px;">One <code>decide(principal, action, resource)</code> &rarr; allow/deny engine.</td>
+              <td style="padding:12px 16px;">library</td>
+              <td style="padding:12px 16px; color:var(--green);">shipping</td>
+            </tr>
+            <tr>
+              <td style="padding:12px 16px;">mini-console</td>
+              <td style="padding:12px 16px;">Optional unified admin UI over the family.</td>
+              <td style="padding:12px 16px;">service</td>
+              <td style="padding:12px 16px; color:var(--amber);">roadmap</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it fits together -->
+  <section>
+    <div class="container">
+      <h2>How it fits together</h2>
+      <p>
+        The names alone don't reveal the runtime relationships. Both issuers mint through one token
+        plane; everything decides through one policy engine; and the keys that sign tokens are
+        themselves wrapped by the KMS — the recursive integration.
+      </p>
+      <div class="protocol-diagram">
+        <h3>Runtime relationships</h3>
+        <pre>
+   Humans (browser)                      Services / workloads
+        │                                       │
+        ▼                                       ▼
+   ┌───────────┐                          ┌───────────┐
+   │ mini-oidc │  human SSO (PKCE,        │ mini-idp  │  machine tokens
+   │           │  passkeys via pk-auth)   │           │  (client-credentials)
+   └─────┬─────┘                          └─────┬─────┘
+         │     both resolve identities from     │
+         │     mini-directory, mint through ─────┤
+         ▼                                       ▼
+   ╔══════════════════════════════════════════════════╗
+   ║  mini-token   —  JWS · JWKS · rotation · sessions ║
+   ╚════════════════════════┬═════════════════════════╝
+                            │  signing keys wrapped by
+                            ▼
+                      ┌───────────┐
+                      │ mini-kms  │  envelope encryption / KMS
+                      └───────────┘   (also wraps mini-ca's CA key)
+
+   mini-directory  — the identity source of truth (issuers resolve here)
+   mini-policy     — one decide(principal, action, resource) for every service
+   mini-gateway    — forward-auth: reuses mini-token sessions + mini-policy routes</pre>
+      </div>
+      <p>
+        <strong>mini-directory</strong> is the source of truth: mini-idp reads its service accounts
+        from it on every token request, and mini-oidc resolves humans from it.
+        <strong>mini-gateway</strong> reads the very same SSO session mini-oidc writes — there is one
+        session mechanism in the family, not two. Read the full map in
+        <a href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/DIRECTION.md">DIRECTION.md</a>.
+      </p>
+    </div>
+  </section>
+
+  <!-- Learn auth -->
+  <section>
+    <div class="container">
+      <h2>Learn authentication &amp; authorization</h2>
+      <p>
+        mini-auth doubles as a <strong>course</strong>. The docs teach the principles using the
+        family as the worked example — and every concept ends with a pointer into the shipping code.
+        Two complementary on-ramps: <strong>concepts-first</strong>
+        (<a href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/TEACHING.md">TEACHING.md</a>)
+        or <strong>code-first</strong>
+        (<a href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/LEARNING.md">LEARNING.md</a>).
+      </p>
+      <div class="features">
+        <div class="feature">
+          <h4>Concepts, built from zero</h4>
+          <p>authn vs authz, what a token <em>is</em>, sessions vs tokens, OAuth/OIDC flows,
+             envelope encryption, the authorization model, and the family's secure-design reflexes.</p>
+        </div>
+        <div class="feature">
+          <h4>Hands-on labs</h4>
+          <p>Predict-then-run tutorials. The keystone: build and verify an Ed25519 token by hand,
+             then flip one byte and watch verification fail.</p>
+        </div>
+        <div class="feature">
+          <h4>A security track</h4>
+          <p>A threat-model overview plus per-service findings written as issue &rarr; attack &rarr;
+             defense &rarr; test — teaching threat modeling as a method, not a checklist.</p>
+        </div>
+        <div class="feature">
+          <h4>Honest seams</h4>
+          <p>The docs name every path that is <em>designed but not yet wired</em>, so a lab never
+             sends you to trace something through code that the code doesn't actually do.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Documentation entry point -->
+  <section>
+    <div class="container">
+      <h2>Documentation</h2>
+      <p>This site is the entry point; the docs themselves live in the repository.</p>
+      <div class="link-grid">
+        <a class="link-card" href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/TEACHING.md">
+          <h4>Course (start here)</h4>
+          <p>The concepts-first syllabus — one screen, then it routes you through concepts &rarr; labs &rarr; security.</p>
+        </a>
+        <a class="link-card" href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/LEARNING.md">
+          <h4>Code-first reading order</h4>
+          <p>Walk the source in dependency order, smallest and most-foundational first.</p>
+        </a>
+        <a class="link-card" href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/DIRECTION.md">
+          <h4>Architecture map</h4>
+          <p>The canonical direction doc: vision, catalog, topology, runtime relationships, roadmap.</p>
+        </a>
+        <a class="link-card" href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/GLOSSARY.md">
+          <h4>Glossary</h4>
+          <p>The crypto / JOSE / OAuth / OIDC / authorization vocabulary, defined once.</p>
+        </a>
+        <a class="link-card" href="https://github.com/codeheadsystems/mini-auth/tree/main/docs/concepts">
+          <h4>Concepts</h4>
+          <p>Explanation docs that build each idea from zero, then point at the real code.</p>
+        </a>
+        <a class="link-card" href="https://github.com/codeheadsystems/mini-auth/tree/main/docs/tutorials">
+          <h4>Tutorials</h4>
+          <p>Six hands-on, guaranteed-to-succeed labs threaded through one "protect grafana" story.</p>
+        </a>
+        <a class="link-card" href="https://github.com/codeheadsystems/mini-auth/tree/main/docs/howto">
+          <h4>How-to guides</h4>
+          <p>Task-oriented recipes: run the whole family, rotate keys, wire the services together.</p>
+        </a>
+        <a class="link-card" href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/security/threat-model-overview.md">
+          <h4>Security &amp; threat model</h4>
+          <p>The trust boundaries, the residual risks, and the per-service finding write-ups.</p>
+        </a>
+        <a class="link-card" href="https://github.com/codeheadsystems/mini-auth/tree/main/docs/diagrams">
+          <h4>Sequence diagrams</h4>
+          <p>The client-credentials, auth-code+PKCE, forward-auth, and KMS-wrap flows.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick start -->
+  <section>
+    <div class="container">
+      <h2>Quick start</h2>
+      <p>JDK 21+ on your <code>PATH</code>. One root wrapper builds and tests the whole family.</p>
+
+      <div class="quickstart-tabs">
+        <div class="quickstart-tab active" onclick="showTab('run')">Run the family</div>
+        <div class="quickstart-tab" onclick="showTab('build')">Build &amp; test</div>
+        <div class="quickstart-tab" onclick="showTab('learn')">Learn by reading</div>
+      </div>
+
+      <div id="tab-run" class="quickstart-content active">
+        <pre><span style="color:var(--muted)"># bring the family up in dependency order (loopback only), tear down on Ctrl-C</span>
+git clone https://github.com/codeheadsystems/mini-auth.git
+cd mini-auth
+
+docs/examples/run-family.sh              <span style="color:var(--muted)"># directory + idp + oidc + gateway</span>
+docs/examples/run-family.sh --with-kms   <span style="color:var(--muted)"># also mini-kms, signing keys wrapped</span></pre>
+        <p>
+          It builds the launchers, generates demo secrets, binds everything to <code>127.0.0.1</code>,
+          and prints each service's <code>/docs</code> URL. See
+          <a href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/howto/run-the-whole-family.md">run-the-whole-family.md</a>.
+        </p>
+      </div>
+
+      <div id="tab-build" class="quickstart-content">
+        <pre>./gradlew build        <span style="color:var(--muted)"># compile + test EVERYTHING — this IS the CI gate</span>
+./gradlew test         <span style="color:var(--muted)"># tests only, all modules</span>
+./gradlew :services:mini-oidc:installDist   <span style="color:var(--muted)"># a runnable launcher</span></pre>
+        <p>
+          One toolchain (JDK 21), one version catalog, one set of convention plugins. No separate
+          linter — <code>./gradlew build</code> is the full gate.
+        </p>
+      </div>
+
+      <div id="tab-learn" class="quickstart-content">
+        <pre><span style="color:var(--muted)"># concepts-first — the course</span>
+open docs/TEACHING.md
+
+<span style="color:var(--muted)"># or code-first — walk the source in dependency order</span>
+open docs/LEARNING.md
+
+<span style="color:var(--muted)"># the keystone lab: build and verify a token by hand</span>
+open docs/tutorials/02-build-and-verify-a-token-by-hand.md</pre>
+        <p>
+          Keep <a href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/GLOSSARY.md">GLOSSARY.md</a>
+          open for vocabulary, and read
+          <a href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/concepts/honest-seams.md">honest-seams.md</a>
+          before any deep dive.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <p>
+        mini-auth is an educational open-source project under the
+        <a href="https://github.com/codeheadsystems/mini-auth/blob/main/LICENSE">MIT License</a>.
+        Real, sound cryptographic constructions — but <strong>not audited</strong>, and not a
+        substitute for production identity infrastructure. Created by
+        <a href="https://github.com/wolpert">Ned Wolpert</a>.
+      </p>
+      <p style="margin-top: 8px;">
+        <a href="https://github.com/codeheadsystems/mini-auth">GitHub</a> &middot;
+        <a href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/TEACHING.md">Learn</a> &middot;
+        <a href="https://github.com/codeheadsystems/mini-auth/blob/main/docs/DIRECTION.md">Architecture</a> &middot;
+        <a href="https://github.com/codeheadsystems/pk-auth">pk-auth</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    function showTab(name) {
+      document.querySelectorAll('.quickstart-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.quickstart-content').forEach(c => c.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('tab-' + name).classList.add('active');
+    }
+  </script>
+
+</body>
+</html>
