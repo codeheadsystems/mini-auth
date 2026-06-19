@@ -32,6 +32,7 @@ class HttpTransportTest {
   private HttpTransport transport;
   private final AtomicReference<String> lastAuthHeader = new AtomicReference<>();
   private final AtomicReference<String> lastBody = new AtomicReference<>();
+  private final AtomicReference<String> lastContentType = new AtomicReference<>();
 
   @BeforeEach
   void setUp() throws IOException {
@@ -57,6 +58,12 @@ class HttpTransportTest {
       exchange.close();
     });
     server.createContext("/postboom", exchange -> respond(exchange, 409, "{\"error\":\"secret detail\"}"));
+    server.createContext("/token", exchange -> {
+      lastContentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+      lastBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+      respond(exchange, 200, "{\"id\":\"t\",\"size\":1}");
+    });
+    server.createContext("/formboom", exchange -> respond(exchange, 401, "{\"error\":\"secret detail\"}"));
     server.start();
     final URI base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
     transport = new HttpTransport(base, "test-token");
@@ -134,6 +141,25 @@ class HttpTransportTest {
   void post_non2xx_collapsesToClientException_withNoOracle() {
     final ClientException thrown =
         assertThrows(ClientException.class, () -> transport.post("/postboom", new Widget("x", 1), Widget.class));
+    assertTrue(thrown.getMessage() != null && !thrown.getMessage().contains("secret"));
+  }
+
+  @Test
+  void postForm_sendsUrlEncodedBodyAndParsesJson() {
+    final Widget result = transport.postForm("/token",
+        java.util.Map.of("grant_type", "client_credentials", "client_id", "a b"), Widget.class);
+    assertEquals("t", result.id());
+    assertEquals("application/x-www-form-urlencoded", lastContentType.get());
+    // Fields are URL-encoded (the space in "a b" becomes %2 / + per the encoder) and ampersand-joined.
+    assertTrue(lastBody.get().contains("grant_type=client_credentials"));
+    assertTrue(lastBody.get().contains("client_id=a"));
+    assertTrue(lastBody.get().contains("&"));
+  }
+
+  @Test
+  void postForm_non2xx_collapsesToClientException_withNoOracle() {
+    final ClientException thrown = assertThrows(ClientException.class,
+        () -> transport.postForm("/formboom", java.util.Map.of("k", "v"), Widget.class));
     assertTrue(thrown.getMessage() != null && !thrown.getMessage().contains("secret"));
   }
 

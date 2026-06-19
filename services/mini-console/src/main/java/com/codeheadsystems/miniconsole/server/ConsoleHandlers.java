@@ -1,7 +1,12 @@
 package com.codeheadsystems.miniconsole.server;
 
 import com.codeheadsystems.miniclient.common.ClientException;
+import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
+import com.codeheadsystems.miniconsole.harness.ExerciseResult;
+import com.codeheadsystems.miniconsole.harness.flows.M2mTokenFlow;
+import com.codeheadsystems.miniconsole.pages.AuditPages;
 import com.codeheadsystems.miniconsole.pages.DashboardPage;
+import com.codeheadsystems.miniconsole.pages.HarnessPages;
 import com.codeheadsystems.miniconsole.pages.IdentitiesPages;
 import com.codeheadsystems.miniconsole.pages.LoginPage;
 import com.codeheadsystems.miniconsole.server.http.ApiException;
@@ -16,6 +21,7 @@ import com.codeheadsystems.minidirectory.client.model.NewHuman;
 import com.codeheadsystems.minidirectory.client.model.NewRole;
 import com.codeheadsystems.minidirectory.client.model.NewServiceAccount;
 import com.codeheadsystems.minidirectory.client.model.ServiceAccountCreated;
+import com.codeheadsystems.miniidp.client.MiniIdpClient;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -50,6 +56,9 @@ public final class ConsoleHandlers {
   private final Csrf csrf;
   private final long sessionTtlSeconds;
   private final MiniDirectoryClient directory;
+  private final MiniIdpClient idp;
+  private final ExerciseRegistry exercises;
+  private final M2mTokenFlow m2mFlow;
 
   /**
    * @param session           the console-login session store.
@@ -58,16 +67,23 @@ public final class ConsoleHandlers {
    * @param csrf              the double-submit CSRF helper.
    * @param sessionTtlSeconds the session cookie {@code Max-Age}.
    * @param directory         the mini-directory client, or null when the directory is not configured.
+   * @param idp               the mini-idp client, or null when mini-idp is not configured.
+   * @param exercises         the exercise registry (for the Harness page listing).
+   * @param m2mFlow           the machine-to-machine token flow (dispatched by the run route).
    */
   public ConsoleHandlers(final ConsoleSession session, final AdminAuthenticator auth,
                          final Cookies cookies, final Csrf csrf, final long sessionTtlSeconds,
-                         final MiniDirectoryClient directory) {
+                         final MiniDirectoryClient directory, final MiniIdpClient idp,
+                         final ExerciseRegistry exercises, final M2mTokenFlow m2mFlow) {
     this.session = session;
     this.auth = auth;
     this.cookies = cookies;
     this.csrf = csrf;
     this.sessionTtlSeconds = sessionTtlSeconds;
     this.directory = directory;
+    this.idp = idp;
+    this.exercises = exercises;
+    this.m2mFlow = m2mFlow;
   }
 
   /** @return the router with the console routes registered. */
@@ -91,6 +107,10 @@ public final class ConsoleHandlers {
         .route("POST", "/groups/{id}/delete", this::deleteGroup)
         .route("GET", "/roles/{id}/delete", this::deleteRoleConfirm)
         .route("POST", "/roles/{id}/delete", this::deleteRole)
+        // mini-idp (Slice 3): the audit log and the exercise harness.
+        .route("GET", "/audit", this::audit)
+        .route("GET", "/harness", this::harness)
+        .route("POST", "/harness/m2m-token/run", this::runM2mToken)
         .route("POST", "/logout", this::logout);
   }
 
@@ -136,8 +156,8 @@ public final class ConsoleHandlers {
     final String token = csrf.mint();
     final String host = context.header("Host");
     final String address = host != null ? host : "loopback";
-    return htmlWithCsrf(DashboardPage.render(address, token, directory != null, directoryStatus()),
-        token);
+    return htmlWithCsrf(DashboardPage.render(address, token, directory != null, directoryStatus(),
+        idp != null, idpStatus()), token);
   }
 
   /** @return the live mini-directory status line for the Dashboard row (no secret, no oracle). */
@@ -149,6 +169,18 @@ public final class ConsoleHandlers {
       return "healthy (" + directory.health().status() + ")";
     } catch (final ClientException e) {
       // Reachability problem — report it generically; never leak the cause.
+      return "unreachable";
+    }
+  }
+
+  /** @return the live mini-idp status line for the Dashboard row (no secret, no oracle). */
+  private String idpStatus() {
+    if (idp == null) {
+      return "not configured (set --idp-url)";
+    }
+    try {
+      return "healthy (" + idp.health().status() + ")";
+    } catch (final ClientException e) {
       return "unreachable";
     }
   }
@@ -294,6 +326,63 @@ public final class ConsoleHandlers {
       directory.deleteRole(id);
       return HttpResponse.redirect("/identities");
     });
+  }
+
+  // ---- mini-idp: Audit + Harness (Slice 3) ---------------------------------------------------
+
+  /** The mini-idp audit log (read-only); "not configured" without an IDP, generic on any failure. */
+  private HttpResponse audit(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (idp == null) {
+      return htmlWithCsrf(AuditPages.notConfigured(token), token);
+    }
+    try {
+      return htmlWithCsrf(AuditPages.list(idp.audit(), token), token);
+    } catch (final ClientException e) {
+      // A refused admin token and an unreachable IDP look the same — no oracle.
+      return htmlWithCsrf(AuditPages.unavailable(token), token);
+    }
+  }
+
+  /** The Harness page: list the available exercises (and the m2m run form). */
+  private HttpResponse harness(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (idp == null) {
+      return htmlWithCsrf(HarnessPages.notConfigured(token), token);
+    }
+    return htmlWithCsrf(HarnessPages.list(exercises, token), token);
+  }
+
+  /**
+   * Run the machine-to-machine token flow with the operator-supplied client id + secret. Session-
+   * required and CSRF-guarded; the credentials are used for the single run and never stored or
+   * logged. The rendered result carries only the non-secret facts the flow returned.
+   */
+  private HttpResponse runM2mToken(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (idp == null) {
+      return htmlWithCsrf(HarnessPages.notConfigured(token), token);
+    }
+    final Map<String, String> form = context.formParams();
+    if (!csrf.verify(context.cookie(Cookies.CSRF), form.get("csrf"))) {
+      throw ApiException.badRequest("invalid or missing CSRF token");
+    }
+    // The secret lives only for this call; it is never put into the session, a log, or the result.
+    final ExerciseResult result =
+        m2mFlow.run(idp, form.getOrDefault("clientId", ""), form.getOrDefault("clientSecret", ""));
+    return htmlWithCsrf(HarnessPages.result(result, token), token);
   }
 
   /**

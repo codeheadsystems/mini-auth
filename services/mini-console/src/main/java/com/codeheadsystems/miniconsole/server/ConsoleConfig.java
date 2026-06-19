@@ -20,6 +20,8 @@ import java.util.Map;
  *   --session-ttl-seconds N   MINICONSOLE_SESSION_TTL_SECONDS console-login session lifetime (default 43200 = 12h)
  *   --directory-url URL       MINICONSOLE_DIRECTORY_URL       mini-directory origin to wire (optional)
  *   --directory-token-file P  MINICONSOLE_DIRECTORY_TOKEN_FILE file holding the directory admin token (alt: MINICONSOLE_DIRECTORY_TOKEN env)
+ *   --idp-url URL             MINICONSOLE_IDP_URL             mini-idp origin to wire (optional)
+ *   --idp-token-file PATH     MINICONSOLE_IDP_TOKEN_FILE      file holding the idp admin token (alt: MINICONSOLE_IDP_TOKEN env)
  * </pre>
  *
  * <p><b>Downstream tokens are console-scoped.</b> The console holds a copy of each downstream
@@ -46,10 +48,12 @@ public final class ConsoleConfig {
   private final Duration sessionTtl;
   private final URI directoryUrl;
   private final Path directoryTokenFilePath;
+  private final URI idpUrl;
+  private final Path idpTokenFilePath;
 
   ConsoleConfig(final String host, final int port, final Path dataDir, final Path adminTokenFilePath,
                 final boolean secureCookies, final Duration sessionTtl, final URI directoryUrl,
-                final Path directoryTokenFilePath) {
+                final Path directoryTokenFilePath, final URI idpUrl, final Path idpTokenFilePath) {
     this.host = host;
     this.port = port;
     this.dataDir = dataDir;
@@ -58,6 +62,8 @@ public final class ConsoleConfig {
     this.sessionTtl = sessionTtl;
     this.directoryUrl = directoryUrl;
     this.directoryTokenFilePath = directoryTokenFilePath;
+    this.idpUrl = idpUrl;
+    this.idpTokenFilePath = idpTokenFilePath;
   }
 
   /** Resolve configuration from CLI args and the environment. */
@@ -70,6 +76,8 @@ public final class ConsoleConfig {
     Integer sessionTtl = envInt(env, "MINICONSOLE_SESSION_TTL_SECONDS");
     String directoryUrl = env.get("MINICONSOLE_DIRECTORY_URL");
     String directoryTokenFile = env.get("MINICONSOLE_DIRECTORY_TOKEN_FILE");
+    String idpUrl = env.get("MINICONSOLE_IDP_URL");
+    String idpTokenFile = env.get("MINICONSOLE_IDP_TOKEN_FILE");
 
     for (int i = 0; i < args.length; i++) {
       final String arg = args[i];
@@ -82,6 +90,8 @@ public final class ConsoleConfig {
         case "--session-ttl-seconds" -> sessionTtl = Integer.parseInt(requireValue(args, ++i, arg));
         case "--directory-url" -> directoryUrl = requireValue(args, ++i, arg);
         case "--directory-token-file" -> directoryTokenFile = requireValue(args, ++i, arg);
+        case "--idp-url" -> idpUrl = requireValue(args, ++i, arg);
+        case "--idp-token-file" -> idpTokenFile = requireValue(args, ++i, arg);
         default -> throw new IllegalArgumentException("unknown argument: " + arg);
       }
     }
@@ -99,7 +109,9 @@ public final class ConsoleConfig {
         secureCookies,
         Duration.ofSeconds(positiveOr(sessionTtl, DEFAULT_SESSION_TTL_SECONDS)),
         directoryUrl != null && !directoryUrl.isBlank() ? URI.create(directoryUrl.trim()) : null,
-        directoryTokenFile != null ? Paths.get(directoryTokenFile) : null);
+        directoryTokenFile != null ? Paths.get(directoryTokenFile) : null,
+        idpUrl != null && !idpUrl.isBlank() ? URI.create(idpUrl.trim()) : null,
+        idpTokenFile != null ? Paths.get(idpTokenFile) : null);
   }
 
   /** @return the loopback bind host. */
@@ -140,6 +152,16 @@ public final class ConsoleConfig {
   /** @return the file the directory admin token may be read from, or null (then the env var). */
   public Path directoryTokenFilePath() {
     return directoryTokenFilePath;
+  }
+
+  /** @return the mini-idp origin to wire, or null if mini-idp is not configured. */
+  public URI idpUrl() {
+    return idpUrl;
+  }
+
+  /** @return the file the idp admin token may be read from, or null (then the env var). */
+  public Path idpTokenFilePath() {
+    return idpTokenFilePath;
   }
 
   private static int positiveOr(final Integer value, final int fallback) {

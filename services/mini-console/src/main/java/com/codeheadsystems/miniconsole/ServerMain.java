@@ -4,6 +4,7 @@ import com.codeheadsystems.miniclient.common.TokenResolver;
 import com.codeheadsystems.miniconsole.server.ConsoleConfig;
 import com.codeheadsystems.miniconsole.server.ConsoleServer;
 import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
+import com.codeheadsystems.miniidp.client.MiniIdpClient;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -26,6 +27,7 @@ public final class ServerMain {
 
   static final String ENV_ADMIN_TOKEN = "MINICONSOLE_ADMIN_TOKEN";
   static final String ENV_DIRECTORY_TOKEN = "MINICONSOLE_DIRECTORY_TOKEN";
+  static final String ENV_IDP_TOKEN = "MINICONSOLE_IDP_TOKEN";
 
   private ServerMain() {
   }
@@ -48,9 +50,10 @@ public final class ServerMain {
     final String consoleToken = resolveToken(env.get(ENV_ADMIN_TOKEN), config.adminTokenFilePath(),
         "no console token configured: set " + ENV_ADMIN_TOKEN + " or provide --admin-token-file");
     final MiniDirectoryClient directory = wireDirectory(config, env);
+    final MiniIdpClient idp = wireIdp(config, env);
 
     final ConsoleServer server =
-        ConsoleServer.create(config, consoleToken, directory, Clock.systemUTC());
+        ConsoleServer.create(config, consoleToken, directory, idp, Clock.systemUTC());
 
     final CountDownLatch shutdown = new CountDownLatch(1);
     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -86,6 +89,24 @@ public final class ServerMain {
         "--directory-url is set but no directory token: set " + ENV_DIRECTORY_TOKEN
             + " or provide --directory-token-file");
     return MiniDirectoryClient.http(config.directoryUrl(), token);
+  }
+
+  /**
+   * Build the mini-idp client if (and only if) an idp URL is configured. The idp admin token is
+   * resolved from {@code MINICONSOLE_IDP_TOKEN} or {@code --idp-token-file} (console-scoped, never
+   * argv, never logged) and is required once a URL is set (the audit page needs it; the public token
+   * and JWKS calls do not, but the client holds one token for the admin surface).
+   *
+   * @return the wired client, or null when mini-idp is not configured.
+   */
+  private static MiniIdpClient wireIdp(final ConsoleConfig config, final Map<String, String> env)
+      throws IOException {
+    if (config.idpUrl() == null) {
+      return null;
+    }
+    final String token = TokenResolver.require(env.get(ENV_IDP_TOKEN), config.idpTokenFilePath(),
+        "--idp-url is set but no idp token: set " + ENV_IDP_TOKEN + " or provide --idp-token-file");
+    return MiniIdpClient.http(config.idpUrl(), token);
   }
 
   private static String resolveToken(final String fromEnv, final Path file, final String missingMessage)

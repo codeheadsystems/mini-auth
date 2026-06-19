@@ -6,8 +6,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse.BodyHandlers;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.StringJoiner;
 import tools.jackson.databind.JavaType;
 
 /**
@@ -22,8 +26,9 @@ import tools.jackson.databind.JavaType;
  * family's no-oracle rule requires.
  *
  * <p>Slice 1 added {@code GET}; Slice 2 adds the mutating verbs ({@code POST}/{@code PUT}/
- * {@code DELETE}) its first real consumer (the directory client's create/assign/delete) needs — no
- * speculative surface beyond that.
+ * {@code DELETE}) the directory client's create/assign/delete needs; Slice 3 adds
+ * {@link #postForm} for the one endpoint that speaks {@code application/x-www-form-urlencoded}
+ * rather than JSON — mini-idp's OAuth {@code /oauth/token} — no speculative surface beyond that.
  */
 public final class HttpTransport {
 
@@ -53,7 +58,7 @@ public final class HttpTransport {
    * @throws ClientException on any failure (no status/body detail leaked).
    */
   public <T> T get(final String path, final Class<T> type) {
-    return read(exchange("GET", path, null), Json.mapper().constructType(type));
+    return read(exchange("GET", path, null, "application/json"), Json.mapper().constructType(type));
   }
 
   /**
@@ -64,7 +69,7 @@ public final class HttpTransport {
   public <T> List<T> getList(final String path, final Class<T> element) {
     final JavaType listType =
         Json.mapper().getTypeFactory().constructCollectionType(List.class, element);
-    return read(exchange("GET", path, null), listType);
+    return read(exchange("GET", path, null, "application/json"), listType);
   }
 
   /**
@@ -73,7 +78,8 @@ public final class HttpTransport {
    * @throws ClientException on any failure (no status/body detail leaked).
    */
   public <T> T post(final String path, final Object body, final Class<T> type) {
-    return read(exchange("POST", path, serialize(body)), Json.mapper().constructType(type));
+    return read(exchange("POST", path, serialize(body), "application/json"),
+        Json.mapper().constructType(type));
   }
 
   /**
@@ -82,7 +88,8 @@ public final class HttpTransport {
    * @throws ClientException on any failure (no status/body detail leaked).
    */
   public <T> T put(final String path, final Object body, final Class<T> type) {
-    return read(exchange("PUT", path, serialize(body)), Json.mapper().constructType(type));
+    return read(exchange("PUT", path, serialize(body), "application/json"),
+        Json.mapper().constructType(type));
   }
 
   /**
@@ -91,18 +98,43 @@ public final class HttpTransport {
    * @throws ClientException on any failure (no status/body detail leaked).
    */
   public void delete(final String path) {
-    exchange("DELETE", path, null);
+    exchange("DELETE", path, null, "application/json");
+  }
+
+  /**
+   * POST an {@code application/x-www-form-urlencoded} body and deserialize the JSON response into
+   * {@code type}. This is the OAuth content type — mini-idp's {@code /oauth/token} expects form
+   * fields, not JSON — so it is its own method rather than overloading {@link #post}.
+   *
+   * @throws ClientException on any failure (no status/body detail leaked).
+   */
+  public <T> T postForm(final String path, final Map<String, String> form, final Class<T> type) {
+    return read(exchange("POST", path, encodeForm(form), "application/x-www-form-urlencoded"),
+        Json.mapper().constructType(type));
+  }
+
+  /** URL-encode a form map into a {@code k=v&k=v} body. */
+  private static byte[] encodeForm(final Map<String, String> form) {
+    final StringJoiner joiner = new StringJoiner("&");
+    for (final Map.Entry<String, String> field : form.entrySet()) {
+      joiner.add(URLEncoder.encode(field.getKey(), StandardCharsets.UTF_8)
+          + "=" + URLEncoder.encode(field.getValue(), StandardCharsets.UTF_8));
+    }
+    return joiner.toString().getBytes(StandardCharsets.UTF_8);
   }
 
   /**
    * Issue one request and return its body bytes, collapsing every failure to {@link ClientException}.
    *
-   * @param method the HTTP method.
-   * @param path   the path appended to the base URI.
-   * @param body   the JSON request body bytes, or null for a body-less request (GET/DELETE).
+   * @param method      the HTTP method.
+   * @param path        the path appended to the base URI.
+   * @param body        the request body bytes, or null for a body-less request (GET/DELETE).
+   * @param contentType the {@code Content-Type} for a body (JSON or form-urlencoded); ignored when
+   *                    {@code body} is null.
    * @return the response body bytes (possibly empty, e.g. a 204).
    */
-  private byte[] exchange(final String method, final String path, final byte[] body) {
+  private byte[] exchange(final String method, final String path, final byte[] body,
+                          final String contentType) {
     try {
       final HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(base + path))
           .timeout(REQUEST_TIMEOUT)
@@ -111,7 +143,7 @@ public final class HttpTransport {
         request.header("Authorization", "Bearer " + bearerToken);
       }
       if (body != null) {
-        request.header("Content-Type", "application/json");
+        request.header("Content-Type", contentType);
         request.method(method, BodyPublishers.ofByteArray(body));
       } else {
         request.method(method, BodyPublishers.noBody());
