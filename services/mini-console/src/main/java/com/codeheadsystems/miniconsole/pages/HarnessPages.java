@@ -4,8 +4,10 @@ import com.codeheadsystems.miniconsole.harness.Exercise;
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
 import com.codeheadsystems.miniconsole.harness.ExerciseResult;
 import com.codeheadsystems.miniconsole.harness.flows.CertLifecycleFlow;
+import com.codeheadsystems.miniconsole.harness.flows.GatewayVerifyFlow;
 import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 import com.codeheadsystems.miniconsole.harness.flows.OidcCodePkceFlow;
+import java.util.List;
 
 /**
  * The Harness pages: a list of end-to-end exercises the operator can run to smoke-test the family,
@@ -28,25 +30,35 @@ public final class HarnessPages {
    * input (it generates its own CSR). Each exercise's form is shown only when its backend is wired,
    * else a note pointing at the flag that wires it. The mutating flows carry an explicit warning.
    *
-   * @param registry      the registered exercises.
-   * @param idpAvailable  whether a mini-idp client is wired (gates the idp flows).
-   * @param caAvailable   whether a mini-ca client is wired (gates the certificate flow).
-   * @param oidcAvailable whether a mini-oidc client is wired (gates the OIDC flow).
-   * @param csrf          the CSRF token for the run form(s) and the nav (escaped here).
+   * @param registry         the registered exercises.
+   * @param idpAvailable     whether a mini-idp client is wired (gates the idp flows).
+   * @param caAvailable      whether a mini-ca client is wired (gates the certificate flow).
+   * @param oidcAvailable    whether a mini-oidc client is wired (gates the OIDC flow).
+   * @param gatewayAvailable whether a mini-gateway client is wired (gates the gateway flow).
+   * @param csrf             the CSRF token for the run form(s) and the nav (escaped here).
    * @return a complete HTML document.
    */
   public static String list(final ExerciseRegistry registry, final boolean idpAvailable,
                             final boolean caAvailable, final boolean oidcAvailable,
-                            final String csrf) {
+                            final boolean gatewayAvailable, final String csrf) {
     final StringBuilder body = new StringBuilder();
     body.append("<p class=\"muted\">Run an end-to-end flow against the wired services and verify the "
         + "result. Credentials you enter are used for the single run and never stored.</p>");
+    // Run-all: drives every flow that needs no operator credential and summarizes the outcomes. The
+    // credential-needing flows are reported SKIP — run those individually below.
+    body.append("""
+        <form method="post" action="/harness/run-all" style="margin:.5rem 0">
+          <input type="hidden" name="csrf" value="$CSRF">
+          <button type="submit">Run all (no-credential flows)</button>
+        </form>
+        """.replace("$CSRF", Layout.escape(csrf)));
     for (final Exercise exercise : registry.all()) {
       body.append("<section style=\"margin-top:1.5rem\"><h2 style=\"font-size:1.1rem\">")
           .append(Layout.escape(exercise.title())).append("</h2><p class=\"muted\">")
           .append(Layout.escape(exercise.description())).append("</p>");
       final boolean isCert = CertLifecycleFlow.ID.equals(exercise.id());
       final boolean isOidc = OidcCodePkceFlow.ID.equals(exercise.id());
+      final boolean isGateway = GatewayVerifyFlow.ID.equals(exercise.id());
       if (KeyRotationFlow.ID.equals(exercise.id())) {
         body.append("<p class=\"warn\">This exercise rotates a real mini-idp signing key.</p>");
       } else if (isCert) {
@@ -56,6 +68,8 @@ public final class HarnessPages {
         body.append(caAvailable ? noInputRunForm(exercise.id(), csrf) : requires("--ca-url"));
       } else if (isOidc) {
         body.append(oidcAvailable ? oidcRunForm(exercise.id(), csrf) : requires("--oidc-url"));
+      } else if (isGateway) {
+        body.append(gatewayAvailable ? gatewayRunForm(exercise.id(), csrf) : requires("--gateway-url"));
       } else {
         body.append(idpAvailable ? runForm(exercise.id(), csrf) : requires("--idp-url"));
       }
@@ -93,11 +107,42 @@ public final class HarnessPages {
     return Layout.page("Harness result", Layout.authenticatedNav(csrf), body.toString());
   }
 
-  /** The page shown when no harness backend (mini-idp, mini-ca, or mini-oidc) is configured. */
+  /**
+   * Render the summary of a "run all": a one-line tally ({@code X passed, Y skipped, Z failed}) and a
+   * compact row per exercise with its overall status and (non-secret) summary. The full per-step
+   * detail stays on the individual-run page; this is the at-a-glance smoke-test view.
+   *
+   * @param results the per-exercise results (already secret-free by contract).
+   * @param csrf    the CSRF token for the nav (escaped here).
+   * @return a complete HTML document.
+   */
+  public static String summary(final List<ExerciseResult> results, final String csrf) {
+    long passed = results.stream().filter(r -> r.status() == ExerciseResult.Status.PASS).count();
+    long skipped = results.stream().filter(r -> r.status() == ExerciseResult.Status.SKIP).count();
+    long failed = results.stream().filter(r -> r.status() == ExerciseResult.Status.FAIL).count();
+
+    final StringBuilder body = new StringBuilder();
+    body.append("<p><strong class=\"").append(failed == 0 ? "" : "warn").append("\">")
+        .append(passed).append(" passed, ").append(skipped).append(" skipped, ")
+        .append(failed).append(" failed").append("</strong></p>");
+    body.append("<table><thead><tr><th>Exercise</th><th>Status</th><th>Summary</th></tr></thead><tbody>");
+    for (final ExerciseResult result : results) {
+      final boolean clean = result.status() == ExerciseResult.Status.PASS;
+      body.append("<tr><td>").append(Layout.escape(result.title())).append("</td><td class=\"")
+          .append(clean ? "" : "warn").append("\">").append(result.status())
+          .append("</td><td>").append(Layout.escape(result.summary())).append("</td></tr>");
+    }
+    body.append("</tbody></table>");
+    body.append("<p style=\"margin-top:1rem\"><a href=\"/harness\">Back to the Harness</a></p>");
+    return Layout.page("Harness summary", Layout.authenticatedNav(csrf), body.toString());
+  }
+
+  /** The page shown when no harness backend (mini-idp, mini-ca, mini-oidc, or mini-gateway) is set. */
   public static String notConfigured(final String csrf) {
     final String body = "<p class=\"muted\">No services are configured for the harness. Set "
         + "<code>--idp-url</code> (for the token flows), <code>--ca-url</code> (for the certificate "
-        + "flow), and/or <code>--oidc-url</code> (for the OIDC flow) to enable exercises.</p>";
+        + "flow), <code>--oidc-url</code> (for the OIDC flow), and/or <code>--gateway-url</code> (for "
+        + "the forward-auth flow) to enable exercises.</p>";
     return Layout.page("Harness", Layout.authenticatedNav(csrf), body);
   }
 
@@ -141,6 +186,26 @@ public final class HarnessPages {
           <p><label>Authorization code (optional)<br><input type="text" name="code" autocomplete="off"></label></p>
           <p><label>PKCE code_verifier (optional)<br><input type="text" name="codeVerifier" autocomplete="off"></label></p>
           <p><label>Client secret (confidential clients, optional)<br><input type="password" name="clientSecret" autocomplete="off"></label></p>
+          <button type="submit">Run</button>
+        </form>
+        """.replace("$ID", Layout.escape(exerciseId)).replace("$CSRF", Layout.escape(csrf));
+  }
+
+  /**
+   * The gateway run form. The path is always submitted (to drive the anonymous-denial branch); the
+   * bearer token + scope-gated path are optional — supply them to exercise the allow and forbid
+   * branches. The bearer is a password input over a POST body, so it never lands in a URL or a log.
+   */
+  private static String gatewayRunForm(final String exerciseId, final String csrf) {
+    return """
+        <form method="post" action="/harness/$ID/run" style="margin-top:.5rem">
+          <input type="hidden" name="csrf" value="$CSRF">
+          <p><label>Gated path<br><input type="text" name="path" value="/" autocomplete="off"></label></p>
+          <p><label>Method<br><input type="text" name="method" value="GET" autocomplete="off"></label></p>
+          <p class="muted">Supply a bearer access token to exercise the allow branch, plus a path its
+          scope does NOT cover to exercise the forbid branch:</p>
+          <p><label>Bearer access token (optional)<br><input type="password" name="bearerToken" autocomplete="off"></label></p>
+          <p><label>Scope-gated path (optional)<br><input type="text" name="scopePath" autocomplete="off"></label></p>
           <button type="submit">Run</button>
         </form>
         """.replace("$ID", Layout.escape(exerciseId)).replace("$CSRF", Layout.escape(csrf));

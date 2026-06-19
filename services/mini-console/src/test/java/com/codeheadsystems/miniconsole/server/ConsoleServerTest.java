@@ -119,7 +119,10 @@ class ConsoleServerTest {
   void dashboard_isHonest_aboutUnwiredClients() throws Exception {
     final HttpResponse<String> dashboard = get("/", Cookies.SESSION + "=" + signIn());
     assertEquals(200, dashboard.statusCode());
-    assertTrue(dashboard.body().contains("client not wired yet"));
+    // With no downstream client wired, every row honestly reads "not configured" (no fabricated
+    // data), and the gateway row points at the flag that wires it.
+    assertTrue(dashboard.body().contains("not configured"));
+    assertTrue(dashboard.body().contains("--gateway-url"));
   }
 
   @Test

@@ -1,9 +1,11 @@
 package com.codeheadsystems.miniconsole.server;
 
 import com.codeheadsystems.miniclient.common.ClientException;
+import com.codeheadsystems.miniconsole.harness.Exercise;
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
 import com.codeheadsystems.miniconsole.harness.ExerciseResult;
 import com.codeheadsystems.miniconsole.harness.flows.CertLifecycleFlow;
+import com.codeheadsystems.miniconsole.harness.flows.GatewayVerifyFlow;
 import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 import com.codeheadsystems.miniconsole.harness.flows.M2mTokenFlow;
 import com.codeheadsystems.miniconsole.harness.flows.OidcCodePkceFlow;
@@ -21,6 +23,7 @@ import com.codeheadsystems.miniconsole.server.http.ApiException;
 import com.codeheadsystems.miniconsole.server.http.HttpResponse;
 import com.codeheadsystems.miniconsole.server.http.RequestContext;
 import com.codeheadsystems.miniconsole.server.http.Router;
+import com.codeheadsystems.miniconsole.server.http.StaticResource;
 import com.codeheadsystems.minica.client.MiniCaClient;
 import com.codeheadsystems.minica.client.model.Certificate;
 import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
@@ -31,6 +34,7 @@ import com.codeheadsystems.minidirectory.client.model.NewHuman;
 import com.codeheadsystems.minidirectory.client.model.NewRole;
 import com.codeheadsystems.minidirectory.client.model.NewServiceAccount;
 import com.codeheadsystems.minidirectory.client.model.ServiceAccountCreated;
+import com.codeheadsystems.minigateway.client.MiniGatewayClient;
 import com.codeheadsystems.miniidp.client.MiniIdpClient;
 import com.codeheadsystems.minikms.protocol.KeyGroupView;
 import com.codeheadsystems.minioidc.client.MiniOidcClient;
@@ -42,6 +46,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
@@ -79,11 +84,14 @@ public final class ConsoleHandlers {
   private final KeyGroupAdmin keys;
   private final MiniCaClient ca;
   private final MiniOidcClient oidc;
+  private final MiniGatewayClient gateway;
   private final ExerciseRegistry exercises;
   private final M2mTokenFlow m2mFlow;
   private final KeyRotationFlow keyRotationFlow;
   private final CertLifecycleFlow certLifecycleFlow;
   private final OidcCodePkceFlow oidcFlow;
+  private final GatewayVerifyFlow gatewayFlow;
+  private final OpenApiDocument openApi;
 
   /**
    * @param session           the console-login session store.
@@ -96,19 +104,23 @@ public final class ConsoleHandlers {
    * @param keys              the KMS key-group admin port, or null when mini-kms is not configured.
    * @param ca                the mini-ca client, or null when mini-ca is not configured.
    * @param oidc              the mini-oidc client, or null when mini-oidc is not configured.
+   * @param gateway           the mini-gateway client, or null when mini-gateway is not configured.
    * @param exercises         the exercise registry (for the Harness page listing).
    * @param m2mFlow           the machine-to-machine token flow (dispatched by its run route).
    * @param keyRotationFlow   the signing-key rotation flow (dispatched by its run route).
    * @param certLifecycleFlow the certificate-lifecycle flow (dispatched by its run route).
    * @param oidcFlow          the OIDC code+PKCE flow (dispatched by its run route).
+   * @param gatewayFlow       the gateway forward-auth flow (dispatched by its run route).
+   * @param openApi           the loaded OpenAPI spec for the read-only {@code /api} JSON surface.
    */
   public ConsoleHandlers(final ConsoleSession session, final AdminAuthenticator auth,
                          final Cookies cookies, final Csrf csrf, final long sessionTtlSeconds,
                          final MiniDirectoryClient directory, final MiniIdpClient idp,
                          final KeyGroupAdmin keys, final MiniCaClient ca, final MiniOidcClient oidc,
-                         final ExerciseRegistry exercises, final M2mTokenFlow m2mFlow,
-                         final KeyRotationFlow keyRotationFlow,
-                         final CertLifecycleFlow certLifecycleFlow, final OidcCodePkceFlow oidcFlow) {
+                         final MiniGatewayClient gateway, final ExerciseRegistry exercises,
+                         final M2mTokenFlow m2mFlow, final KeyRotationFlow keyRotationFlow,
+                         final CertLifecycleFlow certLifecycleFlow, final OidcCodePkceFlow oidcFlow,
+                         final GatewayVerifyFlow gatewayFlow, final OpenApiDocument openApi) {
     this.session = session;
     this.auth = auth;
     this.cookies = cookies;
@@ -119,11 +131,14 @@ public final class ConsoleHandlers {
     this.keys = keys;
     this.ca = ca;
     this.oidc = oidc;
+    this.gateway = gateway;
     this.exercises = exercises;
     this.m2mFlow = m2mFlow;
     this.keyRotationFlow = keyRotationFlow;
     this.certLifecycleFlow = certLifecycleFlow;
     this.oidcFlow = oidcFlow;
+    this.gatewayFlow = gatewayFlow;
+    this.openApi = openApi;
   }
 
   /** @return the router with the console routes registered. */
@@ -154,6 +169,8 @@ public final class ConsoleHandlers {
         .route("POST", "/harness/key-rotation/run", this::runKeyRotation)
         .route("POST", "/harness/cert-lifecycle/run", this::runCertLifecycle)
         .route("POST", "/harness/oidc-pkce/run", this::runOidcPkce)
+        .route("POST", "/harness/gateway-verify/run", this::runGatewayVerify)
+        .route("POST", "/harness/run-all", this::runAll)
         // mini-oidc relying-party clients (Slice 6): list + register (one-time secret banner).
         .route("GET", "/clients", this::clients)
         .route("POST", "/clients", this::registerClient)
@@ -173,6 +190,18 @@ public final class ConsoleHandlers {
         .route("POST", "/keys/kms/{group}/destroy", this::destroyVersion)
         .route("POST", "/keys/idp/rotate", this::rotateIdpKey)
         .route("POST", "/keys/oidc/rotate", this::rotateOidcKey)
+        // The read-only JSON /api surface + its OpenAPI docs (Slice 8). The /api/* endpoints are
+        // guarded by the console bearer token; the spec + Swagger UI are public (no secrets).
+        .route("GET", "/api/health", this::apiHealth)
+        .route("GET", "/api/harness", this::apiHarness)
+        .route("GET", "/openapi.yaml", c -> HttpResponse.raw(200, "application/yaml", openApi.yaml()))
+        .route("GET", "/openapi.json", c -> HttpResponse.raw(200, "application/json", openApi.json()))
+        .route("GET", "/docs", c -> HttpResponse.text(200, "text/html; charset=utf-8", SwaggerUiPage.HTML))
+        .route("GET", "/docs/swagger-ui.css",
+            c -> HttpResponse.raw(200, "text/css", StaticResource.bytes("/swagger-ui/swagger-ui.css")))
+        .route("GET", "/docs/swagger-ui-bundle.js",
+            c -> HttpResponse.raw(200, "application/javascript",
+                StaticResource.bytes("/swagger-ui/swagger-ui-bundle.js")))
         .route("POST", "/logout", this::logout);
   }
 
@@ -220,7 +249,7 @@ public final class ConsoleHandlers {
     final String address = host != null ? host : "loopback";
     return htmlWithCsrf(DashboardPage.render(address, token, directory != null, directoryStatus(),
         idp != null, idpStatus(), keys != null, keysStatus(), ca != null, caStatus(),
-        oidc != null, oidcStatus()), token);
+        oidc != null, oidcStatus(), gateway != null, gatewayStatus()), token);
   }
 
   /** @return the live mini-directory status line for the Dashboard row (no secret, no oracle). */
@@ -275,6 +304,18 @@ public final class ConsoleHandlers {
     }
     try {
       return "healthy (" + oidc.health().status() + ")";
+    } catch (final ClientException e) {
+      return "unreachable";
+    }
+  }
+
+  /** @return the live mini-gateway status line for the Dashboard row (no secret, no oracle). */
+  private String gatewayStatus() {
+    if (gateway == null) {
+      return "not configured (set --gateway-url)";
+    }
+    try {
+      return "healthy (" + gateway.health().status() + ")";
     } catch (final ClientException e) {
       return "unreachable";
     }
@@ -450,11 +491,11 @@ public final class ConsoleHandlers {
       return redirect;
     }
     final String token = csrf.mint();
-    if (idp == null && ca == null && oidc == null) {
+    if (idp == null && ca == null && oidc == null && gateway == null) {
       return htmlWithCsrf(HarnessPages.notConfigured(token), token);
     }
-    return htmlWithCsrf(
-        HarnessPages.list(exercises, idp != null, ca != null, oidc != null, token), token);
+    return htmlWithCsrf(HarnessPages.list(exercises, idp != null, ca != null, oidc != null,
+        gateway != null, token), token);
   }
 
   /** Run the machine-to-machine token flow with the operator-supplied client id + secret. */
@@ -516,6 +557,137 @@ public final class ConsoleHandlers {
         form.getOrDefault("code", ""), form.getOrDefault("codeVerifier", ""));
     final ExerciseResult result = oidcFlow.run(oidc, inputs);
     return htmlWithCsrf(HarnessPages.result(result, token), token);
+  }
+
+  /**
+   * Run the gateway forward-auth flow. Session-required and CSRF-guarded. The form supplies a gated
+   * path (always) plus an optional bearer access token and a scope-gated path for the allow/forbid
+   * branches; without a bearer the flow runs only the anonymous-denial branch. The bearer lives only
+   * for the run and is never stored or logged.
+   */
+  private HttpResponse runGatewayVerify(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (gateway == null) {
+      return htmlWithCsrf(HarnessPages.notConfigured(token), token);
+    }
+    final Map<String, String> form = context.formParams();
+    if (!csrf.verify(context.cookie(Cookies.CSRF), form.get("csrf"))) {
+      throw ApiException.badRequest("invalid or missing CSRF token");
+    }
+    final GatewayVerifyFlow.Inputs inputs = new GatewayVerifyFlow.Inputs(
+        form.getOrDefault("method", "GET"), form.getOrDefault("path", "/"),
+        form.getOrDefault("bearerToken", ""), form.getOrDefault("scopePath", ""));
+    final ExerciseResult result = gatewayFlow.run(gateway, inputs);
+    return htmlWithCsrf(HarnessPages.result(result, token), token);
+  }
+
+  /**
+   * Run every exercise that can run without operator-supplied credentials and render a summary line
+   * plus each result. Session-required and CSRF-guarded. The flows that need a per-run secret (the m2m
+   * token + signing-key rotation) are honestly reported SKIP rather than run with no credentials; the
+   * certificate, OIDC, and gateway flows run their no-input/no-credential paths. No secret is ever
+   * involved, so nothing here can leak one.
+   */
+  private HttpResponse runAll(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (idp == null && ca == null && oidc == null && gateway == null) {
+      return htmlWithCsrf(HarnessPages.notConfigured(token), token);
+    }
+    if (!csrf.verify(context.cookie(Cookies.CSRF), context.formParams().get("csrf"))) {
+      throw ApiException.badRequest("invalid or missing CSRF token");
+    }
+    final List<ExerciseResult> results = new ArrayList<>();
+    // The credential-needing token flows cannot run unattended — report SKIP, never a fake PASS.
+    results.add(skipped(m2mFlow, "needs a client id + secret — run it individually from the Harness page"));
+    results.add(skipped(keyRotationFlow,
+        "needs a client id + secret (and rotates a real key) — run it individually"));
+    // The certificate flow needs no input; run it when mini-ca is wired.
+    results.add(ca != null ? certLifecycleFlow.run(ca)
+        : skipped(certLifecycleFlow, "mini-ca is not configured (set --ca-url)"));
+    // The OIDC flow runs its automatable parts and SKIPs the interactive login (no code supplied).
+    results.add(oidc != null
+        ? oidcFlow.run(oidc, new OidcCodePkceFlow.Inputs("", "", "openid", "", "", ""))
+        : skipped(oidcFlow, "mini-oidc is not configured (set --oidc-url)"));
+    // The gateway flow runs the anonymous-denial branch and SKIPs the bearer branches (no token).
+    results.add(gateway != null
+        ? gatewayFlow.run(gateway, new GatewayVerifyFlow.Inputs("GET", "/", "", ""))
+        : skipped(gatewayFlow, "mini-gateway is not configured (set --gateway-url)"));
+    return htmlWithCsrf(HarnessPages.summary(results, token), token);
+  }
+
+  /** @return a synthetic SKIP result for an exercise that could not be run unattended. */
+  private static ExerciseResult skipped(final Exercise exercise, final String reason) {
+    return new ExerciseResult(exercise.id(), exercise.title(), ExerciseResult.Status.SKIP,
+        List.of(new ExerciseResult.Step("Not run", ExerciseResult.Status.SKIP, reason)), reason);
+  }
+
+  // ---- Read-only JSON /api surface (Slice 8) -------------------------------------------------
+
+  /**
+   * The health rollup as JSON — the programmatic twin of the Dashboard. Guarded by the console bearer
+   * token (401 on a missing/wrong token, no oracle). Never returns a secret.
+   */
+  private HttpResponse apiHealth(final RequestContext context) {
+    auth.requireAdmin(context.header("Authorization"));
+    final List<Map<String, Object>> services = new ArrayList<>();
+    services.add(service("mini-directory", directory != null, directoryStatus()));
+    services.add(service("mini-idp", idp != null, idpStatus()));
+    services.add(service("mini-kms", keys != null, keysStatus()));
+    services.add(service("mini-ca", ca != null, caStatus()));
+    services.add(service("mini-oidc", oidc != null, oidcStatus()));
+    services.add(service("mini-gateway", gateway != null, gatewayStatus()));
+    return HttpResponse.json(200, Map.of("services", services));
+  }
+
+  /** One service row for the {@code /api/health} rollup. */
+  private static Map<String, Object> service(final String name, final boolean configured,
+                                             final String status) {
+    final Map<String, Object> row = new LinkedHashMap<>();
+    row.put("name", name);
+    row.put("configured", configured);
+    row.put("status", status);
+    return row;
+  }
+
+  /**
+   * The exercise-harness catalog as JSON: each exercise plus whether its backend is wired. Guarded by
+   * the console bearer token. Read-only — running an exercise stays a CSRF-guarded HTML POST.
+   */
+  private HttpResponse apiHarness(final RequestContext context) {
+    auth.requireAdmin(context.header("Authorization"));
+    final List<Map<String, Object>> list = new ArrayList<>();
+    for (final Exercise exercise : exercises.all()) {
+      final Map<String, Object> row = new LinkedHashMap<>();
+      row.put("id", exercise.id());
+      row.put("title", exercise.title());
+      row.put("description", exercise.description());
+      row.put("available", exerciseAvailable(exercise.id()));
+      list.add(row);
+    }
+    return HttpResponse.json(200, Map.of("exercises", list));
+  }
+
+  /** @return whether the backend client an exercise needs is wired. */
+  private boolean exerciseAvailable(final String exerciseId) {
+    if (CertLifecycleFlow.ID.equals(exerciseId)) {
+      return ca != null;
+    }
+    if (OidcCodePkceFlow.ID.equals(exerciseId)) {
+      return oidc != null;
+    }
+    if (GatewayVerifyFlow.ID.equals(exerciseId)) {
+      return gateway != null;
+    }
+    // The remaining flows (m2m token, signing-key rotation) are backed by mini-idp.
+    return idp != null;
   }
 
   // ---- mini-oidc: relying-party clients (Slice 6) --------------------------------------------

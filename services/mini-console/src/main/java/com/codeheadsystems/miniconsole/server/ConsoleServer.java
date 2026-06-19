@@ -2,6 +2,7 @@ package com.codeheadsystems.miniconsole.server;
 
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
 import com.codeheadsystems.miniconsole.harness.flows.CertLifecycleFlow;
+import com.codeheadsystems.miniconsole.harness.flows.GatewayVerifyFlow;
 import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 import com.codeheadsystems.miniconsole.harness.flows.M2mTokenFlow;
 import com.codeheadsystems.miniconsole.harness.flows.OidcCodePkceFlow;
@@ -9,6 +10,7 @@ import com.codeheadsystems.miniconsole.kms.KeyGroupAdmin;
 import com.codeheadsystems.miniconsole.server.http.Router;
 import com.codeheadsystems.minica.client.MiniCaClient;
 import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
+import com.codeheadsystems.minigateway.client.MiniGatewayClient;
 import com.codeheadsystems.miniidp.client.MiniIdpClient;
 import com.codeheadsystems.minioidc.client.MiniOidcClient;
 import com.sun.net.httpserver.HttpServer;
@@ -124,7 +126,18 @@ public final class ConsoleServer {
 
   /**
    * Build a server, optionally wiring the mini-directory, mini-idp, mini-kms, mini-ca, and mini-oidc
-   * clients.
+   * clients but no mini-gateway. Delegates to the full overload with a null gateway client.
+   */
+  public static ConsoleServer create(final ConsoleConfig config, final String consoleToken,
+                                     final MiniDirectoryClient directory, final MiniIdpClient idp,
+                                     final KeyGroupAdmin keys, final MiniCaClient ca,
+                                     final MiniOidcClient oidc, final Clock clock)
+      throws IOException {
+    return create(config, consoleToken, directory, idp, keys, ca, oidc, null, clock);
+  }
+
+  /**
+   * Build a server, optionally wiring all six downstream clients.
    *
    * @param config       the resolved configuration.
    * @param consoleToken the bootstrap console token guarding login (resolved from env/file).
@@ -134,6 +147,9 @@ public final class ConsoleServer {
    * @param ca           the wired mini-ca client, or null when mini-ca is not configured.
    * @param oidc         the wired mini-oidc client, or null when mini-oidc is not configured. (Tests
    *                     inject a fake here to exercise the Clients/Harness pages without a real OP.)
+   * @param gateway      the wired mini-gateway client, or null when mini-gateway is not configured.
+   *                     (Tests inject a fake here to exercise the gateway harness flow without a real
+   *                     gateway.)
    * @param clock        the clock shared by the session store and the exercise harness.
    * @return a built, not-yet-started server.
    * @throws IOException if the listening socket cannot be opened.
@@ -141,22 +157,25 @@ public final class ConsoleServer {
   public static ConsoleServer create(final ConsoleConfig config, final String consoleToken,
                                      final MiniDirectoryClient directory, final MiniIdpClient idp,
                                      final KeyGroupAdmin keys, final MiniCaClient ca,
-                                     final MiniOidcClient oidc, final Clock clock)
+                                     final MiniOidcClient oidc, final MiniGatewayClient gateway,
+                                     final Clock clock)
       throws IOException {
     final ConsoleSession session = new ConsoleSession(config.dataDir(), clock, config.sessionTtl());
     // The exercise harness: the m2m token flow (Slice 3), the signing-key rotation flow (Slice 4),
-    // the certificate-lifecycle flow (Slice 5), and the OIDC code+PKCE flow (Slice 6). The idp flows
-    // use the wired idp client, the cert flow the ca client, and the OIDC flow the oidc client.
+    // the certificate-lifecycle flow (Slice 5), the OIDC code+PKCE flow (Slice 6), and the gateway
+    // forward-auth flow (Slice 7). Each flow uses the matching wired client.
     final M2mTokenFlow m2mFlow = new M2mTokenFlow(clock);
     final KeyRotationFlow keyRotationFlow = new KeyRotationFlow(clock);
     final CertLifecycleFlow certLifecycleFlow = new CertLifecycleFlow();
     final OidcCodePkceFlow oidcFlow = new OidcCodePkceFlow(clock);
-    final ExerciseRegistry exercises =
-        new ExerciseRegistry(List.of(m2mFlow, keyRotationFlow, certLifecycleFlow, oidcFlow));
+    final GatewayVerifyFlow gatewayFlow = new GatewayVerifyFlow();
+    final ExerciseRegistry exercises = new ExerciseRegistry(
+        List.of(m2mFlow, keyRotationFlow, certLifecycleFlow, oidcFlow, gatewayFlow));
     final ConsoleHandlers handlers = new ConsoleHandlers(
         session, new AdminAuthenticator(consoleToken), new Cookies(config.secureCookies()),
-        new Csrf(), config.sessionTtl().toSeconds(), directory, idp, keys, ca, oidc, exercises,
-        m2mFlow, keyRotationFlow, certLifecycleFlow, oidcFlow);
+        new Csrf(), config.sessionTtl().toSeconds(), directory, idp, keys, ca, oidc, gateway,
+        exercises, m2mFlow, keyRotationFlow, certLifecycleFlow, oidcFlow, gatewayFlow,
+        OpenApiDocument.load());
     final Router router = handlers.router();
 
     final HttpServer http = HttpServer.create(new InetSocketAddress(config.host(), config.port()), 0);

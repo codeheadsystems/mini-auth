@@ -1,0 +1,127 @@
+openapi: 3.1.0
+info:
+  title: mini-console
+  version: "0.1.0"
+  description: >
+    The optional unified admin console over the mini- family. Its operator UI is server-rendered HTML
+    (not described here). This spec documents only the small, read-only JSON `/api` surface — health
+    rollups across the wired services and the exercise-harness catalog — plus the public liveness
+    check. The `/api/*` endpoints are guarded by the console bootstrap token presented as
+    `Authorization: Bearer <console token>`; they add no new authority and never return a secret.
+servers:
+  - url: http://127.0.0.1:8500
+    description: loopback (default bind)
+paths:
+  /health:
+    get:
+      summary: Liveness check (public)
+      description: Public liveness — no authentication, no downstream calls.
+      responses:
+        "200":
+          description: The console is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /api/health:
+    get:
+      summary: Health rollup across the wired services
+      description: >
+        A non-secret rollup of every downstream service's wiring + liveness status, the JSON twin of
+        the Dashboard. Guarded by the console bearer token; no oracle (a refused token and an
+        unreachable downstream are not distinguished by content).
+      security:
+        - consoleToken: []
+      responses:
+        "200":
+          description: The per-service status rollup.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthRollup"
+        "401":
+          description: Missing or invalid console token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/harness:
+    get:
+      summary: The exercise-harness catalog
+      description: >
+        The registered end-to-end exercises and whether each one's backend is wired. Read-only —
+        running an exercise is a CSRF-guarded HTML POST (it may take operator-supplied credentials),
+        not part of this JSON surface. Guarded by the console bearer token.
+      security:
+        - consoleToken: []
+      responses:
+        "200":
+          description: The exercise catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HarnessCatalog"
+        "401":
+          description: Missing or invalid console token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  securitySchemes:
+    consoleToken:
+      type: http
+      scheme: bearer
+      description: The console bootstrap token (the same one pasted into the login form).
+  schemas:
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+    ServiceHealth:
+      type: object
+      properties:
+        name:
+          type: string
+          example: mini-directory
+        configured:
+          type: boolean
+        status:
+          type: string
+          description: A non-secret status line (e.g. "healthy (ok)", "not configured (...)", "unreachable").
+    HealthRollup:
+      type: object
+      properties:
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceHealth"
+    Exercise:
+      type: object
+      properties:
+        id:
+          type: string
+          example: m2m-token
+        title:
+          type: string
+        description:
+          type: string
+        available:
+          type: boolean
+          description: Whether this exercise's backend client is wired.
+    HarnessCatalog:
+      type: object
+      properties:
+        exercises:
+          type: array
+          items:
+            $ref: "#/components/schemas/Exercise"
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        error_description:
+          type: string

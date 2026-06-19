@@ -7,6 +7,7 @@ import com.codeheadsystems.miniconsole.server.ConsoleConfig;
 import com.codeheadsystems.miniconsole.server.ConsoleServer;
 import com.codeheadsystems.minica.client.MiniCaClient;
 import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
+import com.codeheadsystems.minigateway.client.MiniGatewayClient;
 import com.codeheadsystems.miniidp.client.MiniIdpClient;
 import com.codeheadsystems.minioidc.client.MiniOidcClient;
 import java.io.IOException;
@@ -62,9 +63,10 @@ public final class ServerMain {
     final KeyGroupAdmin keys = wireKms(config, env);
     final MiniCaClient ca = wireCa(config, env);
     final MiniOidcClient oidc = wireOidc(config, env);
+    final MiniGatewayClient gateway = wireGateway(config);
 
     final ConsoleServer server = ConsoleServer.create(
-        config, consoleToken, directory, idp, keys, ca, oidc, Clock.systemUTC());
+        config, consoleToken, directory, idp, keys, ca, oidc, gateway, Clock.systemUTC());
 
     final CountDownLatch shutdown = new CountDownLatch(1);
     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -179,6 +181,20 @@ public final class ServerMain {
     final String token = TokenResolver.require(env.get(ENV_OIDC_TOKEN), config.oidcTokenFilePath(),
         "--oidc-url is set but no oidc token: set " + ENV_OIDC_TOKEN + " or provide --oidc-token-file");
     return MiniOidcClient.http(config.oidcUrl(), token);
+  }
+
+  /**
+   * Build the mini-gateway client if (and only if) a gateway URL is configured. Unlike the other
+   * clients it needs <b>no token</b>: the console exercises {@code /verify} the way a reverse proxy
+   * does — the credentials being tested travel in each verify request — and {@code /health} is public.
+   *
+   * @return the wired client, or null when mini-gateway is not configured.
+   */
+  private static MiniGatewayClient wireGateway(final ConsoleConfig config) {
+    if (config.gatewayUrl() == null) {
+      return null;
+    }
+    return MiniGatewayClient.http(config.gatewayUrl());
   }
 
   private static String resolveToken(final String fromEnv, final Path file, final String missingMessage)

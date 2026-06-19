@@ -37,8 +37,14 @@ dependencies {
     // rotation) for the Clients page and the OIDC code+PKCE exercise. Brings mini-token + the PKCE
     // helper + JwsClaimsVerifier (for offline id_token verification) transitively.
     implementation(project(":libs:mini-oidc-client"))
-    // JSON for the session store document (Sessions) and the /health body.
+    // Slice 7: the mini-gateway client (forward-auth /verify + health) for the gateway exercise. It
+    // holds no downstream token (/verify carries the caller's own credentials, /health is public) and
+    // brings mini-client-common transitively.
+    implementation(project(":libs:mini-gateway-client"))
+    // JSON for the session store document (Sessions), the /health body, and the /api JSON surface.
     implementation(libs.jackson.databind)
+    // Slice 8: the /api OpenAPI spec is parsed from its YAML resource and re-emitted as JSON.
+    implementation(libs.jackson.yaml)
 
     // The certificate-lifecycle exercise test boots a REAL mini-ca (plaintext-key mode) and proves the
     // flow issues a leaf that genuinely chains to the CA root.

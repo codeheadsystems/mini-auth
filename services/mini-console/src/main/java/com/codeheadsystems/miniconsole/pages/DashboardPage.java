@@ -1,27 +1,15 @@
 package com.codeheadsystems.miniconsole.pages;
 
-import java.util.List;
-
 /**
  * The Dashboard — the landing page after sign-in.
  *
- * <p>It lists every family service with its wiring status. As of Slice 3, <b>mini-directory and
- * mini-idp are live</b>: each row shows a real {@code health()} result (or "not configured" /
- * "unreachable") and links to its pages. The other four services remain honest placeholders — "n/a —
- * client not wired yet (Slice N)" — calling nothing downstream and fabricating no data, until their
- * slice lands. This is the honest seam the family ethos requires.
+ * <p>It lists every family service with its wiring status. As of Slice 7 <b>all six downstream
+ * services are live</b>: each row shows a real {@code health()} result (or "not configured" /
+ * "unreachable") and links to its pages — mini-directory (Slice 1), mini-idp (Slice 3), mini-kms
+ * (Slice 4), mini-ca (Slice 5), mini-oidc (Slice 6), and mini-gateway (Slice 7). No row fabricates
+ * data: a service the operator did not wire honestly reads "not configured", per the family ethos.
  */
 public final class DashboardPage {
-
-  /** One not-yet-wired service row: display name and the slice number that wires its client. */
-  private record Pending(String name, int slice) {
-  }
-
-  // The services still awaiting a client + page (see the roadmap in docs/design/mini-console.md).
-  // mini-directory (Slice 1), mini-idp (Slice 3), mini-kms (Slice 4), mini-ca (Slice 5), and
-  // mini-oidc (Slice 6) are rendered live below.
-  private static final List<Pending> PENDING = List.of(
-      new Pending("mini-gateway", 7));
 
   private DashboardPage() {
   }
@@ -39,6 +27,8 @@ public final class DashboardPage {
    * @param caStatus            the mini-ca status line (already non-secret, escaped here).
    * @param oidcConfigured      whether a mini-oidc client is wired (links the row when true).
    * @param oidcStatus          the mini-oidc status line (already non-secret, escaped here).
+   * @param gatewayConfigured   whether a mini-gateway client is wired (links the Harness when true).
+   * @param gatewayStatus       the mini-gateway status line (already non-secret, escaped here).
    * @return a complete HTML document.
    */
   public static String render(final String boundAddress, final String csrf,
@@ -46,7 +36,8 @@ public final class DashboardPage {
                               final boolean idpConfigured, final String idpStatus,
                               final boolean kmsConfigured, final String kmsStatus,
                               final boolean caConfigured, final String caStatus,
-                              final boolean oidcConfigured, final String oidcStatus) {
+                              final boolean oidcConfigured, final String oidcStatus,
+                              final boolean gatewayConfigured, final String gatewayStatus) {
     final StringBuilder rows = new StringBuilder();
 
     // mini-directory: live as of Slice 1.
@@ -76,12 +67,10 @@ public final class DashboardPage {
     rows.append("<tr><td>").append(oidcName).append("</td><td>")
         .append(Layout.escape(oidcStatus)).append("</td></tr>");
 
-    // The remaining services: honest placeholders.
-    for (final Pending service : PENDING) {
-      rows.append("<tr><td>").append(Layout.escape(service.name()))
-          .append("</td><td class=\"muted\">n/a — client not wired yet (Slice ")
-          .append(service.slice()).append(")</td></tr>");
-    }
+    // mini-gateway: live as of Slice 7 (its forward-auth exercise lives on the Harness page).
+    final String gatewayName = gatewayConfigured ? "<a href=\"/harness\">mini-gateway</a>" : "mini-gateway";
+    rows.append("<tr><td>").append(gatewayName).append("</td><td>")
+        .append(Layout.escape(gatewayStatus)).append("</td></tr>");
 
     final String body = """
         <p>mini-console is running on <code>$ADDR</code>, signed in as <code>console-admin</code>.</p>

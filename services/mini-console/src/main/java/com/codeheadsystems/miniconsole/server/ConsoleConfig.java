@@ -29,6 +29,7 @@ import java.util.Map;
  *   --ca-token-file PATH      MINICONSOLE_CA_TOKEN_FILE       file holding the ca admin token (alt: MINICONSOLE_CA_TOKEN env)
  *   --oidc-url URL            MINICONSOLE_OIDC_URL            mini-oidc origin to wire (optional)
  *   --oidc-token-file PATH    MINICONSOLE_OIDC_TOKEN_FILE     file holding the oidc admin token (alt: MINICONSOLE_OIDC_TOKEN env)
+ *   --gateway-url URL         MINICONSOLE_GATEWAY_URL         mini-gateway origin to wire (optional; no token — /verify carries the caller's own creds)
  * </pre>
  *
  * <p><b>Downstream tokens are console-scoped.</b> The console holds a copy of each downstream
@@ -65,13 +66,14 @@ public final class ConsoleConfig {
   private final Path caTokenFilePath;
   private final URI oidcUrl;
   private final Path oidcTokenFilePath;
+  private final URI gatewayUrl;
 
   ConsoleConfig(final String host, final int port, final Path dataDir, final Path adminTokenFilePath,
                 final boolean secureCookies, final Duration sessionTtl, final URI directoryUrl,
                 final Path directoryTokenFilePath, final URI idpUrl, final Path idpTokenFilePath,
                 final String kmsHost, final int kmsPort, final Path kmsApiTokenFilePath,
                 final Path kmsAdminTokenFilePath, final URI caUrl, final Path caTokenFilePath,
-                final URI oidcUrl, final Path oidcTokenFilePath) {
+                final URI oidcUrl, final Path oidcTokenFilePath, final URI gatewayUrl) {
     this.host = host;
     this.port = port;
     this.dataDir = dataDir;
@@ -90,6 +92,7 @@ public final class ConsoleConfig {
     this.caTokenFilePath = caTokenFilePath;
     this.oidcUrl = oidcUrl;
     this.oidcTokenFilePath = oidcTokenFilePath;
+    this.gatewayUrl = gatewayUrl;
   }
 
   /** Resolve configuration from CLI args and the environment. */
@@ -111,6 +114,7 @@ public final class ConsoleConfig {
     String caTokenFile = env.get("MINICONSOLE_CA_TOKEN_FILE");
     String oidcUrl = env.get("MINICONSOLE_OIDC_URL");
     String oidcTokenFile = env.get("MINICONSOLE_OIDC_TOKEN_FILE");
+    String gatewayUrl = env.get("MINICONSOLE_GATEWAY_URL");
 
     for (int i = 0; i < args.length; i++) {
       final String arg = args[i];
@@ -132,6 +136,7 @@ public final class ConsoleConfig {
         case "--ca-token-file" -> caTokenFile = requireValue(args, ++i, arg);
         case "--oidc-url" -> oidcUrl = requireValue(args, ++i, arg);
         case "--oidc-token-file" -> oidcTokenFile = requireValue(args, ++i, arg);
+        case "--gateway-url" -> gatewayUrl = requireValue(args, ++i, arg);
         default -> throw new IllegalArgumentException("unknown argument: " + arg);
       }
     }
@@ -159,7 +164,8 @@ public final class ConsoleConfig {
         caUrl != null && !caUrl.isBlank() ? URI.create(caUrl.trim()) : null,
         caTokenFile != null ? Paths.get(caTokenFile) : null,
         oidcUrl != null && !oidcUrl.isBlank() ? URI.create(oidcUrl.trim()) : null,
-        oidcTokenFile != null ? Paths.get(oidcTokenFile) : null);
+        oidcTokenFile != null ? Paths.get(oidcTokenFile) : null,
+        gatewayUrl != null && !gatewayUrl.isBlank() ? URI.create(gatewayUrl.trim()) : null);
   }
 
   /** @return {host, port} parsed from a {@code HOST:PORT} value, or null when not set. */
@@ -272,6 +278,11 @@ public final class ConsoleConfig {
   /** @return the file the oidc admin token may be read from, or null (then the env var). */
   public Path oidcTokenFilePath() {
     return oidcTokenFilePath;
+  }
+
+  /** @return the mini-gateway origin to wire, or null if mini-gateway is not configured. */
+  public URI gatewayUrl() {
+    return gatewayUrl;
   }
 
   private static int positiveOr(final Integer value, final int fallback) {

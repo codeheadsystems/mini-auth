@@ -102,10 +102,16 @@ mini-auth/
 │   ├── mini-gateway/                        (shipping; forward-auth for a reverse proxy)
 │   ├── mini-directory/                      (shipping; identity source of truth; mini-idp reads service accounts from it)
 │   ├── mini-ca/                             (shipping; internal CA, CA key wrapped under mini-kms)
-│   └── mini-console/                        (roadmap placeholder)
+│   └── mini-console/                        (shipping; optional unified admin console + exercise harness over the family)
 └── libs/                        # shared libraries (no transport)
     ├── mini-token/                          (shipping; token plane + shared SSO session store)
-    └── mini-policy/                         (shipping; shared decision engine)
+    ├── mini-policy/                         (shipping; shared decision engine)
+    ├── mini-client-common/                  (shipping; shared HTTP/token/JSON plumbing + no-oracle collapse for the client libs)
+    ├── mini-directory-client/               (shipping; HTTP client consumed by mini-console)
+    ├── mini-idp-client/                     (shipping; HTTP client consumed by mini-console)
+    ├── mini-oidc-client/                    (shipping; HTTP client consumed by mini-console)
+    ├── mini-ca-client/                      (shipping; HTTP client consumed by mini-console)
+    └── mini-gateway-client/                 (shipping; forward-auth /verify client — maps status→outcome, no body oracle)
 ```
 
 | Module | Project path | Type | Status |
@@ -116,9 +122,15 @@ mini-auth/
 | mini-gateway | `:services:mini-gateway` | service (application) | **shipping** (§ below) |
 | mini-directory | `:services:mini-directory` | service (application) | **shipping** (§ below) |
 | mini-ca | `:services:mini-ca` | service (application) | **shipping** (§ below) |
-| mini-console | `:services:mini-console` | service (future) | roadmap placeholder (no logic) |
+| mini-console | `:services:mini-console` | service (application) | **shipping** (§ below) — optional admin console + exercise harness |
 | mini-token | `:libs:mini-token` | library | **shipping** (token plane extracted from mini-idp) |
 | mini-policy | `:libs:mini-policy` | library | **shipping** (shared decision engine; consumed by directory/oidc/gateway/kms) |
+| mini-client-common | `:libs:mini-client-common` | library | **shipping** (HTTP/token/JSON plumbing + no-oracle collapse for the client libs) |
+| mini-directory-client | `:libs:mini-directory-client` | library | **shipping** (consumed by mini-console) |
+| mini-idp-client | `:libs:mini-idp-client` | library | **shipping** (consumed by mini-console) |
+| mini-oidc-client | `:libs:mini-oidc-client` | library | **shipping** (consumed by mini-console) |
+| mini-ca-client | `:libs:mini-ca-client` | library | **shipping** (consumed by mini-console) |
+| mini-gateway-client | `:libs:mini-gateway-client` | library | **shipping** (consumed by mini-console) |
 
 - **Convention plugins, not `subprojects {}`.** The shared Java conventions (JDK 21 toolchain,
   Maven Central, JUnit 5 + the common test stack, the `-parameters` flag) live in the `build-logic`
@@ -508,3 +520,64 @@ services/mini-ca/build/install/mini-ca/bin/mini-ca --port 8499 --data-dir ~/.min
   oracle); no secrets logged; loopback bind.
 - **Docs.** `services/mini-ca/README.md` — scope, the explicit non-goals, the endpoint list, and the
   mini-kms key-wrapping wiring.
+
+---
+
+# Service: mini-console (`services/mini-console`)
+
+mini-console is the **optional unified admin console + exercise harness** over the whole family. Two
+faces in one loopback process: an **operator console** (server-rendered HTML that browses and mutates
+the surfaces the family already exposes) and an **exercise harness** (scripted end-to-end flows that
+drive the family and verify the result **offline**). It is **shipping**, and pure composition: it
+reaches each service through a thin client library, mints/verifies nothing itself, and **adds no new
+authority** — every mutation equals an operator curling a downstream admin API with the same token.
+
+**Run it.** Loopback by default; the console login token + each downstream admin token come from
+env/file (never argv, never logged). Wire only the services you have.
+
+```bash
+export MINICONSOLE_ADMIN_TOKEN="$(openssl rand -hex 32)"
+export MINICONSOLE_DIRECTORY_TOKEN="$MINIDIR_ADMIN_TOKEN"   # held copies of each downstream admin token
+./gradlew :services:mini-console:installDist
+services/mini-console/build/install/mini-console/bin/mini-console --port 8500 --data-dir ~/.mini-console \
+  --directory-url http://127.0.0.1:8466 --idp-url http://127.0.0.1:8455 --oidc-url http://127.0.0.1:8477 \
+  --ca-url http://127.0.0.1:8499 --kms-tcp 127.0.0.1:9123 --gateway-url http://127.0.0.1:8488
+# Sign in at /login; API docs at /docs.
+```
+
+**Architecture.** One application module under base package `com.codeheadsystems.miniconsole`, plus
+five HTTP client libraries under `libs/` (`mini-directory-client`, `mini-idp-client`,
+`mini-oidc-client`, `mini-ca-client`, `mini-gateway-client`) sharing `libs/mini-client-common`.
+
+- **`server`** — `ServerMain`/`ConsoleServer` (composition root; JDK `HttpServer` on loopback, one
+  vthread per request), `ConsoleConfig` (per-downstream URL/token resolution, `MINICONSOLE_*` names),
+  `AdminAuthenticator` (constant-time console token), `ConsoleSession` (mini-token `SessionService`
+  over its OWN `JsonStore`, a **distinct cookie name** — not the SSO cookie), `Cookies`/`Csrf`, the
+  reused `http/` router, and the `/api` OpenAPI serving (`OpenApiDocument`/`SwaggerUiPage`).
+- **`pages`** — hand-rolled HTML (mini-oidc `LoginPages` style) for the Dashboard, Identities,
+  Clients, Keys, Certificates, Audit, and Harness screens; `Layout` escapes everything and **never**
+  renders a secret (the once-only service-account / client secrets are shown exactly once at creation).
+- **`harness`** — the I/O-free exercise engine: `Exercise`/`ExerciseResult`/`ExerciseRegistry` and the
+  flows (`M2mTokenFlow`, `KeyRotationFlow`, `CertLifecycleFlow`, `OidcCodePkceFlow`,
+  `GatewayVerifyFlow`). Each verifies **offline** (JWS-vs-JWKS via mini-token, cert chain to the CA
+  root, the gateway's allow/deny decision); a step it cannot drive (a headless passkey login, a branch
+  with no supplied credential) reports **SKIP**, never a misleading PASS. Results are secret-free by
+  contract.
+
+- **The client libraries.** Each copies only the wire records it needs into its own `…client.model`
+  package and depends on **no service module** (dependency direction is one-way: console → *-client →
+  mini-client-common → catalog; acyclic). All collapse failures to one `ClientException` (no oracle).
+  **mini-kms is the exception:** it reuses the existing `:services:mini-kms:client` (socket-era) as-is.
+  **mini-gateway-client is the other exception:** `/verify`'s whole job is to answer a reverse proxy
+  with distinct statuses, so it deliberately maps 200/302/401/403 to a `VerifyOutcome` instead of
+  collapsing — but it reads no response body, so there is still no body oracle.
+- **The `/api` surface.** A small **read-only JSON** twin of the Dashboard (`GET /api/health`,
+  `GET /api/harness`), guarded by the console bearer token, with `openapi.yaml` + `OpenApiContractTest`
+  (the family contract-test pattern) and a vendored offline Swagger UI at `/docs`.
+- **Security.** No new authority; stores no identity/grants/keys (only login-session/CSRF state in an
+  atomic-`0600` `console-sessions.json`). **The one new secret concentration:** it holds up to six
+  downstream tokens (env/file, never argv, never logged) — a deliberate operator trade-off, mitigated
+  by loopback default. CSRF on every browser POST; PKCE S256 in the OIDC flow; no secrets in logs.
+- **Docs.** `services/mini-console/README.md` (the two faces, the screen/route list, the harness flows
+  and what "pass" means, the security model) and `docs/design/mini-console.md` (the full design +
+  slice history).

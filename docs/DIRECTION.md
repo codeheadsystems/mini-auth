@@ -68,7 +68,9 @@ Every mini, its one-line purpose, whether it is a library or a service, and its 
 | **mini-directory** | The single identity source of truth: humans, groups, roles, service accounts, and their grant mappings; resolves any account to a mini-policy `Principal` + expanded grants. | service | **shipping** (mini-idp reads service accounts from it — required, no local registry; mini-oidc resolves humans from it when `--directory-url` is set) |
 | **pk-auth** | Passkeys-first auth library set, published on Maven Central under `com.codeheadsystems`. Consumed as a normal dependency — **not vendored**. | external library | **shipping (external)** |
 | **mini-ca** | Small internal certificate authority for mTLS between the minis and workload identity in the homelab. Issues/renews short-lived leaves from CSRs; its CA key is wrapped under mini-kms. | service (application) | **shipping** |
-| **mini-console** | Optional unified admin UI over the family. | service (future) | **roadmap** (placeholder module) |
+| **mini-console** | Optional unified admin console + exercise harness over the family: browse/mutate directory identities, rotate signing keys, manage mini-kms key groups, read audit/issuance logs, register OIDC clients, and run end-to-end smoke flows that verify offline. Adds **no new authority** — a client of admin surfaces that already exist. Reaches each service through a thin client library (`libs/*-client` over `libs/mini-client-common`); reuses the existing `:services:mini-kms:client` for the socket plane. | service (application) | **shipping** |
+| **mini-client-common** | Shared client-side HTTP/token/JSON plumbing for the family's HTTP client libraries: env/file token resolver, a loopback `HttpClient`, the shared `JsonMapper`, and the **no-oracle error collapse**. The client-side twin of the still-deferred server-side `mini-common`. | library | **shipping** (consumed by the five `*-client` libs) |
+| **mini-{directory,idp,oidc,ca,gateway}-client** | Thin HTTP clients for mini-console — each copies only the wire records it needs (depends on no service module; acyclic). The gateway client deliberately maps `/verify`'s 200/302/401/403 to a `VerifyOutcome` (the proxy's contract) but reads no body, so still no body oracle. | libraries | **shipping** |
 
 "Scaffolded" means: a correct module that **compiles and passes a trivial test**, with the real
 protocol/crypto left as clearly-marked TODOs at the seams. It is deliberately *not* a half-built
@@ -221,11 +223,14 @@ it is absent.
 > mini-ca. Relocating it into a `libs/mini-kms-client` was considered and is mechanically clean
 > (behavior-preserving, graph stays acyclic), but it was **declined**: the benefit is cosmetic parity
 > with a not-yet-built `libs/<svc>-client` convention, against real churn in three shipping services.
-> Should a future service (e.g. **mini-console**) actually establish a `libs/<svc>-client` convention,
-> mini-kms's client is the **first candidate** to follow it — at which point the `KmsClient` library
-> would move to `libs/mini-kms-client` (with the CLIs staying behind in `:services:mini-kms:client`)
-> and consumers would repoint. Until then, consuming `:services:mini-kms:client` directly is correct,
-> not an oversight.
+> **mini-console** has since established a `libs/<svc>-client` convention for the HTTP services
+> (`libs/{directory,idp,oidc,ca,gateway}-client` over `libs/mini-client-common`), but mini-kms's
+> relocation stayed **declined** as planned: mini-console consumes `:services:mini-kms:client`
+> directly, exactly like mini-idp/mini-oidc/mini-ca. mini-kms's client remains the **first candidate**
+> to follow the convention if the cosmetic-parity calculus ever changes — at which point the
+> `KmsClient` library would move to `libs/mini-kms-client` (with the CLIs staying behind in
+> `:services:mini-kms:client`) and consumers would repoint. Until then, consuming
+> `:services:mini-kms:client` directly is correct, not an oversight.
 
 ### Bootstrap ordering (and why it is not actually circular)
 
@@ -405,10 +410,20 @@ and a JSON revocation list, and **wraps its own CA private key under mini-kms** 
 deliberately not a full PKI (one self-signed root, no intermediates, no signed DER CRL / OCSP, no
 ACME); see `services/mini-ca/README.md` for the scope and non-goals.
 
-**Future tracks (explicitly not scheduled):**
+**mini-console now ships.** The optional unified admin console + exercise harness over the family
+graduated from placeholder to a runnable, loopback-only service across vertical slices: it browses and
+mutates mini-directory identities, rotates mini-idp/mini-oidc signing keys, manages mini-kms key
+groups, reads audit/issuance logs, registers OIDC clients, and runs end-to-end smoke flows that verify
+**offline** (JWS-vs-JWKS, cert chain to the CA root, the gateway's allow/deny decision). It adds **no
+new authority** — every action equals an operator curling a downstream admin API with the same token —
+and reaches each service through a thin client library (`libs/{directory,idp,oidc,ca,gateway}-client`
+over `libs/mini-client-common`'s no-oracle transport), reusing `:services:mini-kms:client` for the
+socket plane. A small read-only JSON `/api` surface (health rollup + harness catalog) honors the
+family contract-test pattern. Its one new property is a **concentration of downstream admin tokens**
+in one loopback process (env/file, never argv, never logged) — a deliberate, documented trade-off. See
+`services/mini-console/README.md` and `docs/design/mini-console.md`.
 
-- **mini-console** — an optional unified admin UI over the family (directory, key rotation, audit,
-  KMS key groups). A placeholder module exists; no logic yet.
+**Future tracks (explicitly not scheduled):** none currently — the roadmap's named services all ship.
 
 ---
 
@@ -422,8 +437,11 @@ directory, so `settings.gradle.kts` includes them as:
 include("services:mini-kms:core"); include("services:mini-kms:server"); include("services:mini-kms:client")
 include("services:mini-idp:core"); include("services:mini-idp:server")
 include("services:mini-oidc"); include("services:mini-gateway"); include("services:mini-directory")
-include("services:mini-ca"); include("services:mini-console")      // mini-ca ships; mini-console is a roadmap placeholder
+include("services:mini-ca"); include("services:mini-console")      // both ship
 include("libs:mini-token"); include("libs:mini-policy")
+include("libs:mini-client-common")                                 // shared HTTP/token/JSON plumbing for the client libs
+include("libs:mini-directory-client"); include("libs:mini-idp-client"); include("libs:mini-oidc-client")
+include("libs:mini-ca-client"); include("libs:mini-gateway-client") // mini-console's per-service HTTP clients
 ```
 
 `include("services:mini-kms:core")` maps to the directory `services/mini-kms/core` and auto-creates
