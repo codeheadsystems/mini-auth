@@ -1,0 +1,66 @@
+# Dependabot configuration for the mini-auth monorepo.
+#
+# Keeps dependencies current across the three update surfaces this repo has:
+#   1. the root Gradle build         — the one shared version catalog
+#                                       (gradle/libs.versions.toml) drives every module
+#   2. the build-logic included build — a separate Gradle build (its own settings.gradle.kts)
+#                                       holding the convention plugins
+#   3. GitHub Actions                 — the actions pinned in .github/workflows
+#
+# Updates target `main` (the default branch and the CI gate); `./gradlew build` from the root
+# runs the whole family's tests, so each PR is validated end to end before merge.
+#
+# To reduce PR churn, non-major (minor + patch) bumps are grouped into a single PR per ecosystem;
+# major bumps still open individually so a breaking change gets its own review.
+version: 2
+
+updates:
+  # 1. Root Gradle build — resolves the shared catalog at gradle/libs.versions.toml.
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "build"
+    labels:
+      - "dependencies"
+      - "gradle"
+    groups:
+      gradle-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # 2. The build-logic included build (convention plugins) — a distinct Gradle build root.
+  - package-ecosystem: "gradle"
+    directory: "/build-logic"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build"
+    labels:
+      - "dependencies"
+      - "build-logic"
+    groups:
+      build-logic-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # 3. GitHub Actions used by the CI workflow(s) under .github/workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      actions-all:
+        patterns:
+          - "*"
