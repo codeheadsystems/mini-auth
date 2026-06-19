@@ -63,6 +63,7 @@ public final class Layout {
         <nav style="display:flex;gap:1rem;align-items:center">
           <a href="/">Dashboard</a>
           <a href="/identities">Identities</a>
+          <a href="/clients">Clients</a>
           <a href="/keys">Keys</a>
           <a href="/certificates">Certificates</a>
           <a href="/audit">Audit</a>

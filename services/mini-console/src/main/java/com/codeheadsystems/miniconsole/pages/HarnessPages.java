@@ -5,6 +5,7 @@ import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
 import com.codeheadsystems.miniconsole.harness.ExerciseResult;
 import com.codeheadsystems.miniconsole.harness.flows.CertLifecycleFlow;
 import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
+import com.codeheadsystems.miniconsole.harness.flows.OidcCodePkceFlow;
 
 /**
  * The Harness pages: a list of end-to-end exercises the operator can run to smoke-test the family,
@@ -27,14 +28,16 @@ public final class HarnessPages {
    * input (it generates its own CSR). Each exercise's form is shown only when its backend is wired,
    * else a note pointing at the flag that wires it. The mutating flows carry an explicit warning.
    *
-   * @param registry     the registered exercises.
-   * @param idpAvailable whether a mini-idp client is wired (gates the idp flows).
-   * @param caAvailable  whether a mini-ca client is wired (gates the certificate flow).
-   * @param csrf         the CSRF token for the run form(s) and the nav (escaped here).
+   * @param registry      the registered exercises.
+   * @param idpAvailable  whether a mini-idp client is wired (gates the idp flows).
+   * @param caAvailable   whether a mini-ca client is wired (gates the certificate flow).
+   * @param oidcAvailable whether a mini-oidc client is wired (gates the OIDC flow).
+   * @param csrf          the CSRF token for the run form(s) and the nav (escaped here).
    * @return a complete HTML document.
    */
   public static String list(final ExerciseRegistry registry, final boolean idpAvailable,
-                            final boolean caAvailable, final String csrf) {
+                            final boolean caAvailable, final boolean oidcAvailable,
+                            final String csrf) {
     final StringBuilder body = new StringBuilder();
     body.append("<p class=\"muted\">Run an end-to-end flow against the wired services and verify the "
         + "result. Credentials you enter are used for the single run and never stored.</p>");
@@ -43,6 +46,7 @@ public final class HarnessPages {
           .append(Layout.escape(exercise.title())).append("</h2><p class=\"muted\">")
           .append(Layout.escape(exercise.description())).append("</p>");
       final boolean isCert = CertLifecycleFlow.ID.equals(exercise.id());
+      final boolean isOidc = OidcCodePkceFlow.ID.equals(exercise.id());
       if (KeyRotationFlow.ID.equals(exercise.id())) {
         body.append("<p class=\"warn\">This exercise rotates a real mini-idp signing key.</p>");
       } else if (isCert) {
@@ -50,6 +54,8 @@ public final class HarnessPages {
       }
       if (isCert) {
         body.append(caAvailable ? noInputRunForm(exercise.id(), csrf) : requires("--ca-url"));
+      } else if (isOidc) {
+        body.append(oidcAvailable ? oidcRunForm(exercise.id(), csrf) : requires("--oidc-url"));
       } else {
         body.append(idpAvailable ? runForm(exercise.id(), csrf) : requires("--idp-url"));
       }
@@ -67,11 +73,13 @@ public final class HarnessPages {
    * @return a complete HTML document.
    */
   public static String result(final ExerciseResult result, final String csrf) {
-    final boolean passed = result.status() == ExerciseResult.Status.PASS;
     final StringBuilder body = new StringBuilder();
-    body.append("<p><strong class=\"").append(passed ? "" : "warn").append("\">")
-        .append(passed ? "PASS" : "FAIL").append("</strong> — ")
-        .append(Layout.escape(result.title())).append("</p>");
+    // A SKIP overall (e.g. the OIDC flow could not drive a headless passkey login) is reported as
+    // SKIP — never a misleading PASS or FAIL. Only a clean PASS is unstyled; SKIP/FAIL are warned.
+    final ExerciseResult.Status overall = result.status();
+    final boolean clean = overall == ExerciseResult.Status.PASS;
+    body.append("<p><strong class=\"").append(clean ? "" : "warn").append("\">")
+        .append(overall).append("</strong> — ").append(Layout.escape(result.title())).append("</p>");
     body.append("<p>").append(Layout.escape(result.summary())).append("</p>");
     body.append("<table><thead><tr><th>Step</th><th>Status</th><th>Detail</th></tr></thead><tbody>");
     for (final ExerciseResult.Step step : result.steps()) {
@@ -85,11 +93,11 @@ public final class HarnessPages {
     return Layout.page("Harness result", Layout.authenticatedNav(csrf), body.toString());
   }
 
-  /** The page shown when no harness backend (mini-idp or mini-ca) is configured. */
+  /** The page shown when no harness backend (mini-idp, mini-ca, or mini-oidc) is configured. */
   public static String notConfigured(final String csrf) {
     final String body = "<p class=\"muted\">No services are configured for the harness. Set "
-        + "<code>--idp-url</code> (for the token flows) and/or <code>--ca-url</code> (for the "
-        + "certificate flow) to enable exercises.</p>";
+        + "<code>--idp-url</code> (for the token flows), <code>--ca-url</code> (for the certificate "
+        + "flow), and/or <code>--oidc-url</code> (for the OIDC flow) to enable exercises.</p>";
     return Layout.page("Harness", Layout.authenticatedNav(csrf), body);
   }
 
@@ -110,6 +118,29 @@ public final class HarnessPages {
     return """
         <form method="post" action="/harness/$ID/run" style="margin-top:.5rem">
           <input type="hidden" name="csrf" value="$CSRF">
+          <button type="submit">Run</button>
+        </form>
+        """.replace("$ID", Layout.escape(exerciseId)).replace("$CSRF", Layout.escape(csrf));
+  }
+
+  /**
+   * The OIDC run form. The client id / redirect URI / scope are always submitted (to build the
+   * authorize URL); the code + verifier + client secret are optional — supply them, after completing a
+   * manual passkey login at the authorize URL, to drive the exchange + offline id_token verification.
+   * Without a code the flow honestly SKIPs the interactive steps.
+   */
+  private static String oidcRunForm(final String exerciseId, final String csrf) {
+    return """
+        <form method="post" action="/harness/$ID/run" style="margin-top:.5rem">
+          <input type="hidden" name="csrf" value="$CSRF">
+          <p><label>Client id<br><input type="text" name="clientId" autocomplete="off"></label></p>
+          <p><label>Redirect URI<br><input type="text" name="redirectUri" autocomplete="off"></label></p>
+          <p><label>Scope<br><input type="text" name="scope" value="openid profile" autocomplete="off"></label></p>
+          <p class="muted">To complete the interactive login, open the authorize URL this run prints,
+          sign in, then re-run with the returned code and the printed verifier:</p>
+          <p><label>Authorization code (optional)<br><input type="text" name="code" autocomplete="off"></label></p>
+          <p><label>PKCE code_verifier (optional)<br><input type="text" name="codeVerifier" autocomplete="off"></label></p>
+          <p><label>Client secret (confidential clients, optional)<br><input type="password" name="clientSecret" autocomplete="off"></label></p>
           <button type="submit">Run</button>
         </form>
         """.replace("$ID", Layout.escape(exerciseId)).replace("$CSRF", Layout.escape(csrf));

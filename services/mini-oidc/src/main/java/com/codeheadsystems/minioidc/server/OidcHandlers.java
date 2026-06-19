@@ -129,6 +129,10 @@ public final class OidcHandlers {
     // Client admin.
     router.route("POST", "/admin/clients", this::registerClient);
     router.route("GET", "/admin/clients", this::listClients);
+
+    // Signing-key admin (mirrors mini-idp's POST /admin/keys/rotate — both issuers rotate through
+    // mini-token's SigningKeyService).
+    router.route("POST", "/admin/keys/rotate", this::rotateKeys);
     return router;
   }
 
@@ -471,6 +475,16 @@ public final class OidcHandlers {
       views.add(ClientView.from(client));
     }
     return HttpResponse.json(200, views);
+  }
+
+  /**
+   * Rotate the signing key (admin only): activate a fresh Ed25519 key and return the new active kid.
+   * The retired key stays published in the JWKS until its tokens expire. No secret is logged.
+   */
+  private HttpResponse rotateKeys(final RequestContext ctx) {
+    adminAuth.requireAdmin(ctx.header("Authorization"));
+    final String activeKid = tokens.rotateSigningKey();
+    return HttpResponse.json(200, Map.of("activeKid", activeKid));
   }
 
   // ---- Helpers -------------------------------------------------------------------------------

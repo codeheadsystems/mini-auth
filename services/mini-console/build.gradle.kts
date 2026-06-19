@@ -33,6 +33,10 @@ dependencies {
     // generation lives in the client lib, so the console's chain validation stays pure-JDK (no
     // BouncyCastle dependency here).
     implementation(project(":libs:mini-ca-client"))
+    // Slice 6: the mini-oidc client (discovery/JWKS/token/userinfo + client registration + key
+    // rotation) for the Clients page and the OIDC code+PKCE exercise. Brings mini-token + the PKCE
+    // helper + JwsClaimsVerifier (for offline id_token verification) transitively.
+    implementation(project(":libs:mini-oidc-client"))
     // JSON for the session store document (Sessions) and the /health body.
     implementation(libs.jackson.databind)
 

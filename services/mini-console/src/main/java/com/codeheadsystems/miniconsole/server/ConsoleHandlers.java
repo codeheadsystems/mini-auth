@@ -6,10 +6,12 @@ import com.codeheadsystems.miniconsole.harness.ExerciseResult;
 import com.codeheadsystems.miniconsole.harness.flows.CertLifecycleFlow;
 import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 import com.codeheadsystems.miniconsole.harness.flows.M2mTokenFlow;
+import com.codeheadsystems.miniconsole.harness.flows.OidcCodePkceFlow;
 import com.codeheadsystems.miniconsole.kms.KeyAdminException;
 import com.codeheadsystems.miniconsole.kms.KeyGroupAdmin;
 import com.codeheadsystems.miniconsole.pages.AuditPages;
 import com.codeheadsystems.miniconsole.pages.CertificatesPages;
+import com.codeheadsystems.miniconsole.pages.ClientsPages;
 import com.codeheadsystems.miniconsole.pages.DashboardPage;
 import com.codeheadsystems.miniconsole.pages.HarnessPages;
 import com.codeheadsystems.miniconsole.pages.IdentitiesPages;
@@ -31,6 +33,10 @@ import com.codeheadsystems.minidirectory.client.model.NewServiceAccount;
 import com.codeheadsystems.minidirectory.client.model.ServiceAccountCreated;
 import com.codeheadsystems.miniidp.client.MiniIdpClient;
 import com.codeheadsystems.minikms.protocol.KeyGroupView;
+import com.codeheadsystems.minioidc.client.MiniOidcClient;
+import com.codeheadsystems.minioidc.client.model.ClientRegistration;
+import com.codeheadsystems.minioidc.client.model.ClientSummary;
+import com.codeheadsystems.minioidc.client.model.RegisteredClient;
 import com.codeheadsystems.minitoken.jwks.Jwk;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -72,10 +78,12 @@ public final class ConsoleHandlers {
   private final MiniIdpClient idp;
   private final KeyGroupAdmin keys;
   private final MiniCaClient ca;
+  private final MiniOidcClient oidc;
   private final ExerciseRegistry exercises;
   private final M2mTokenFlow m2mFlow;
   private final KeyRotationFlow keyRotationFlow;
   private final CertLifecycleFlow certLifecycleFlow;
+  private final OidcCodePkceFlow oidcFlow;
 
   /**
    * @param session           the console-login session store.
@@ -87,18 +95,20 @@ public final class ConsoleHandlers {
    * @param idp               the mini-idp client, or null when mini-idp is not configured.
    * @param keys              the KMS key-group admin port, or null when mini-kms is not configured.
    * @param ca                the mini-ca client, or null when mini-ca is not configured.
+   * @param oidc              the mini-oidc client, or null when mini-oidc is not configured.
    * @param exercises         the exercise registry (for the Harness page listing).
    * @param m2mFlow           the machine-to-machine token flow (dispatched by its run route).
    * @param keyRotationFlow   the signing-key rotation flow (dispatched by its run route).
    * @param certLifecycleFlow the certificate-lifecycle flow (dispatched by its run route).
+   * @param oidcFlow          the OIDC code+PKCE flow (dispatched by its run route).
    */
   public ConsoleHandlers(final ConsoleSession session, final AdminAuthenticator auth,
                          final Cookies cookies, final Csrf csrf, final long sessionTtlSeconds,
                          final MiniDirectoryClient directory, final MiniIdpClient idp,
-                         final KeyGroupAdmin keys, final MiniCaClient ca,
+                         final KeyGroupAdmin keys, final MiniCaClient ca, final MiniOidcClient oidc,
                          final ExerciseRegistry exercises, final M2mTokenFlow m2mFlow,
                          final KeyRotationFlow keyRotationFlow,
-                         final CertLifecycleFlow certLifecycleFlow) {
+                         final CertLifecycleFlow certLifecycleFlow, final OidcCodePkceFlow oidcFlow) {
     this.session = session;
     this.auth = auth;
     this.cookies = cookies;
@@ -108,10 +118,12 @@ public final class ConsoleHandlers {
     this.idp = idp;
     this.keys = keys;
     this.ca = ca;
+    this.oidc = oidc;
     this.exercises = exercises;
     this.m2mFlow = m2mFlow;
     this.keyRotationFlow = keyRotationFlow;
     this.certLifecycleFlow = certLifecycleFlow;
+    this.oidcFlow = oidcFlow;
   }
 
   /** @return the router with the console routes registered. */
@@ -141,6 +153,10 @@ public final class ConsoleHandlers {
         .route("POST", "/harness/m2m-token/run", this::runM2mToken)
         .route("POST", "/harness/key-rotation/run", this::runKeyRotation)
         .route("POST", "/harness/cert-lifecycle/run", this::runCertLifecycle)
+        .route("POST", "/harness/oidc-pkce/run", this::runOidcPkce)
+        // mini-oidc relying-party clients (Slice 6): list + register (one-time secret banner).
+        .route("GET", "/clients", this::clients)
+        .route("POST", "/clients", this::registerClient)
         // mini-ca certificates (Slice 5): issuance log + revocation list, issue/renew/revoke.
         .route("GET", "/certificates", this::certificates)
         .route("POST", "/certificates/issue", this::issueCert)
@@ -156,6 +172,7 @@ public final class ConsoleHandlers {
         .route("GET", "/keys/kms/{group}/destroy", this::destroyVersionConfirm)
         .route("POST", "/keys/kms/{group}/destroy", this::destroyVersion)
         .route("POST", "/keys/idp/rotate", this::rotateIdpKey)
+        .route("POST", "/keys/oidc/rotate", this::rotateOidcKey)
         .route("POST", "/logout", this::logout);
   }
 
@@ -202,7 +219,8 @@ public final class ConsoleHandlers {
     final String host = context.header("Host");
     final String address = host != null ? host : "loopback";
     return htmlWithCsrf(DashboardPage.render(address, token, directory != null, directoryStatus(),
-        idp != null, idpStatus(), keys != null, keysStatus(), ca != null, caStatus()), token);
+        idp != null, idpStatus(), keys != null, keysStatus(), ca != null, caStatus(),
+        oidc != null, oidcStatus()), token);
   }
 
   /** @return the live mini-directory status line for the Dashboard row (no secret, no oracle). */
@@ -245,6 +263,18 @@ public final class ConsoleHandlers {
     }
     try {
       return "healthy (" + ca.health().status() + ")";
+    } catch (final ClientException e) {
+      return "unreachable";
+    }
+  }
+
+  /** @return the live mini-oidc status line for the Dashboard row (no secret, no oracle). */
+  private String oidcStatus() {
+    if (oidc == null) {
+      return "not configured (set --oidc-url)";
+    }
+    try {
+      return "healthy (" + oidc.health().status() + ")";
     } catch (final ClientException e) {
       return "unreachable";
     }
@@ -420,10 +450,11 @@ public final class ConsoleHandlers {
       return redirect;
     }
     final String token = csrf.mint();
-    if (idp == null && ca == null) {
+    if (idp == null && ca == null && oidc == null) {
       return htmlWithCsrf(HarnessPages.notConfigured(token), token);
     }
-    return htmlWithCsrf(HarnessPages.list(exercises, idp != null, ca != null, token), token);
+    return htmlWithCsrf(
+        HarnessPages.list(exercises, idp != null, ca != null, oidc != null, token), token);
   }
 
   /** Run the machine-to-machine token flow with the operator-supplied client id + secret. */
@@ -461,7 +492,83 @@ public final class ConsoleHandlers {
   }
 
   /**
-   * The shared guard for running a harness exercise: session-required and CSRF-guarded, the operator-
+   * Run the OIDC authorization-code + PKCE flow. Session-required and CSRF-guarded. The form supplies
+   * a client id, redirect URI, and scope (always), plus an optional code + verifier + client secret to
+   * complete the exchange after a manual passkey login. Without a code the flow honestly SKIPs the
+   * interactive steps. The secret/code/verifier live only for the run and are never stored or logged.
+   */
+  private HttpResponse runOidcPkce(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (oidc == null) {
+      return htmlWithCsrf(HarnessPages.notConfigured(token), token);
+    }
+    final Map<String, String> form = context.formParams();
+    if (!csrf.verify(context.cookie(Cookies.CSRF), form.get("csrf"))) {
+      throw ApiException.badRequest("invalid or missing CSRF token");
+    }
+    final OidcCodePkceFlow.Inputs inputs = new OidcCodePkceFlow.Inputs(
+        form.getOrDefault("clientId", ""), form.getOrDefault("redirectUri", ""),
+        form.getOrDefault("scope", "openid"), form.getOrDefault("clientSecret", ""),
+        form.getOrDefault("code", ""), form.getOrDefault("codeVerifier", ""));
+    final ExerciseResult result = oidcFlow.run(oidc, inputs);
+    return htmlWithCsrf(HarnessPages.result(result, token), token);
+  }
+
+  // ---- mini-oidc: relying-party clients (Slice 6) --------------------------------------------
+
+  /** The registered OIDC clients (read-only); "not configured" without an OP, generic on failure. */
+  private HttpResponse clients(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (oidc == null) {
+      return htmlWithCsrf(ClientsPages.notConfigured(token), token);
+    }
+    try {
+      final List<ClientSummary> list = oidc.listClients();
+      return htmlWithCsrf(ClientsPages.list(list, token), token);
+    } catch (final ClientException e) {
+      return htmlWithCsrf(ClientsPages.unavailable(token), token);
+    }
+  }
+
+  /**
+   * Register a relying-party client. CSRF-guarded; on success renders the one-time client secret in a
+   * banner DIRECTLY (a redirect would lose it) — shown once, never stored, never re-fetchable, never
+   * logged. A public (PKCE-only) client has no secret.
+   */
+  private HttpResponse registerClient(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (oidc == null) {
+      return htmlWithCsrf(ClientsPages.notConfigured(token), token);
+    }
+    final Map<String, String> form = context.formParams();
+    if (!csrf.verify(context.cookie(Cookies.CSRF), form.get("csrf"))) {
+      throw ApiException.badRequest("invalid or missing CSRF token");
+    }
+    try {
+      final RegisteredClient created = oidc.registerClient(new ClientRegistration(
+          form.getOrDefault("name", ""), splitLines(form.get("redirectUris")),
+          splitSpaces(form.getOrDefault("scopes", "openid")),
+          "true".equals(form.get("confidential"))));
+      // Direct HTML (not a redirect): the secret (if any) is shown here and only here.
+      return htmlWithCsrf(ClientsPages.registered(created, token), token);
+    } catch (final ClientException e) {
+      return htmlWithCsrf(ClientsPages.unavailable(token), token);
+    }
+  }
+
+  /** The shared guard for running a harness exercise: session-required and CSRF-guarded, the operator-
    * supplied credentials are used for the single run and never stored or logged, and the rendered
    * result carries only the non-secret facts the flow returned.
    *
@@ -533,7 +640,20 @@ public final class ConsoleHandlers {
         idpState = KeysPages.Availability.UNAVAILABLE;
       }
     }
-    return KeysPages.render(kmsState, groups, idpState, kids, token);
+
+    KeysPages.Availability oidcState;
+    List<String> oidcKids = List.of();
+    if (oidc == null) {
+      oidcState = KeysPages.Availability.NOT_CONFIGURED;
+    } else {
+      try {
+        oidcKids = oidc.jwks().keys().stream().map(Jwk::keyId).toList();
+        oidcState = KeysPages.Availability.OK;
+      } catch (final ClientException e) {
+        oidcState = KeysPages.Availability.UNAVAILABLE;
+      }
+    }
+    return KeysPages.render(kmsState, groups, idpState, kids, oidcState, oidcKids, token);
   }
 
   /** Create a KMS key group (CSRF-guarded). */
@@ -599,6 +719,28 @@ public final class ConsoleHandlers {
       return HttpResponse.redirect("/keys");
     } catch (final ClientException e) {
       // A refused admin token and an unreachable IDP look the same — no oracle.
+      return keysRerender();
+    }
+  }
+
+  /** Rotate the mini-oidc signing key (CSRF-guarded); redirect back to /keys on success. */
+  private HttpResponse rotateOidcKey(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final Map<String, String> form = context.formParams();
+    if (!csrf.verify(context.cookie(Cookies.CSRF), form.get("csrf"))) {
+      throw ApiException.badRequest("invalid or missing CSRF token");
+    }
+    if (oidc == null) {
+      return keysRerender();
+    }
+    try {
+      oidc.rotateSigningKey();
+      return HttpResponse.redirect("/keys");
+    } catch (final ClientException e) {
+      // A refused admin token and an unreachable OP look the same — no oracle.
       return keysRerender();
     }
   }
@@ -856,6 +998,30 @@ public final class ConsoleHandlers {
       }
     }
     return ids;
+  }
+
+  /** Parse a newline-separated textarea (one redirect URI per line) into a blank-free list. */
+  private static List<String> splitLines(final String text) {
+    return splitOn(text, "\\R+");
+  }
+
+  /** Parse a whitespace-separated field (e.g. OAuth scopes) into a blank-free list. */
+  private static List<String> splitSpaces(final String text) {
+    return splitOn(text, "\\s+");
+  }
+
+  private static List<String> splitOn(final String text, final String regex) {
+    if (text == null || text.isBlank()) {
+      return List.of();
+    }
+    final List<String> items = new ArrayList<>();
+    for (final String part : text.trim().split(regex)) {
+      final String trimmed = part.trim();
+      if (!trimmed.isEmpty()) {
+        items.add(trimmed);
+      }
+    }
+    return items;
   }
 
   /**

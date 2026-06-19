@@ -18,10 +18,9 @@ public final class DashboardPage {
   }
 
   // The services still awaiting a client + page (see the roadmap in docs/design/mini-console.md).
-  // mini-directory (Slice 1), mini-idp (Slice 3), mini-kms (Slice 4), and mini-ca (Slice 5) are
-  // rendered live below.
+  // mini-directory (Slice 1), mini-idp (Slice 3), mini-kms (Slice 4), mini-ca (Slice 5), and
+  // mini-oidc (Slice 6) are rendered live below.
   private static final List<Pending> PENDING = List.of(
-      new Pending("mini-oidc", 6),
       new Pending("mini-gateway", 7));
 
   private DashboardPage() {
@@ -38,13 +37,16 @@ public final class DashboardPage {
    * @param kmsStatus           the mini-kms status line (already non-secret, escaped here).
    * @param caConfigured        whether a mini-ca client is wired (links the row when true).
    * @param caStatus            the mini-ca status line (already non-secret, escaped here).
+   * @param oidcConfigured      whether a mini-oidc client is wired (links the row when true).
+   * @param oidcStatus          the mini-oidc status line (already non-secret, escaped here).
    * @return a complete HTML document.
    */
   public static String render(final String boundAddress, final String csrf,
                               final boolean directoryConfigured, final String directoryStatus,
                               final boolean idpConfigured, final String idpStatus,
                               final boolean kmsConfigured, final String kmsStatus,
-                              final boolean caConfigured, final String caStatus) {
+                              final boolean caConfigured, final String caStatus,
+                              final boolean oidcConfigured, final String oidcStatus) {
     final StringBuilder rows = new StringBuilder();
 
     // mini-directory: live as of Slice 1.
@@ -68,6 +70,11 @@ public final class DashboardPage {
     final String caName = caConfigured ? "<a href=\"/certificates\">mini-ca</a>" : "mini-ca";
     rows.append("<tr><td>").append(caName).append("</td><td>")
         .append(Layout.escape(caStatus)).append("</td></tr>");
+
+    // mini-oidc: live as of Slice 6 (links to the Clients page).
+    final String oidcName = oidcConfigured ? "<a href=\"/clients\">mini-oidc</a>" : "mini-oidc";
+    rows.append("<tr><td>").append(oidcName).append("</td><td>")
+        .append(Layout.escape(oidcStatus)).append("</td></tr>");
 
     // The remaining services: honest placeholders.
     for (final Pending service : PENDING) {

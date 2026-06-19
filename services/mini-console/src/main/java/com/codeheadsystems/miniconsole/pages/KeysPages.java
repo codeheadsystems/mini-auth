@@ -42,6 +42,7 @@ public final class KeysPages {
    */
   public static String render(final Availability kmsState, final List<KeyGroupView> groups,
                               final Availability idpState, final List<String> idpKids,
+                              final Availability oidcState, final List<String> oidcKids,
                               final String csrf) {
     final StringBuilder body = new StringBuilder();
 
@@ -56,7 +57,14 @@ public final class KeysPages {
     body.append(switch (idpState) {
       case NOT_CONFIGURED -> muted("Not configured. Set <code>--idp-url</code> and an IDP token.");
       case UNAVAILABLE -> muted("Unavailable.");
-      case OK -> idpSection(idpKids, csrf);
+      case OK -> signingSection(idpKids, "/keys/idp/rotate", csrf);
+    });
+
+    body.append("<h2 style=\"font-size:1.1rem;margin-top:2rem\">mini-oidc signing key</h2>");
+    body.append(switch (oidcState) {
+      case NOT_CONFIGURED -> muted("Not configured. Set <code>--oidc-url</code> and an OIDC token.");
+      case UNAVAILABLE -> muted("Unavailable.");
+      case OK -> signingSection(oidcKids, "/keys/oidc/rotate", csrf);
     });
 
     return Layout.page("Keys", Layout.authenticatedNav(csrf), body.toString());
@@ -159,7 +167,9 @@ public final class KeysPages {
         .replace("$LABEL", Layout.escape(label)).replace("$CSRF", Layout.escape(csrf));
   }
 
-  private static String idpSection(final List<String> kids, final String csrf) {
+  /** The published-keys + rotate-button section, shared by the mini-idp and mini-oidc issuers. */
+  private static String signingSection(final List<String> kids, final String rotateAction,
+                                       final String csrf) {
     final StringBuilder html = new StringBuilder();
     html.append("<p>Published signing keys: ");
     if (kids.isEmpty()) {
@@ -177,7 +187,7 @@ public final class KeysPages {
     html.append("</p>");
     html.append(muted("Rotating mints a fresh key and makes it active; the retired key stays in the "
         + "JWKS so in-flight tokens keep verifying."));
-    html.append(postButton("/keys/idp/rotate", "Rotate signing key", csrf));
+    html.append(postButton(rotateAction, "Rotate signing key", csrf));
     return html.toString();
   }
 

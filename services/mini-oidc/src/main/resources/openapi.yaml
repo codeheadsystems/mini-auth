@@ -285,6 +285,25 @@ paths:
         "200": { description: The clients. }
         "401": { description: Missing or invalid admin token. }
 
+  /admin/keys/rotate:
+    post:
+      tags: [admin]
+      summary: Rotate the signing key
+      description: |
+        Activates a fresh Ed25519 signing key. The previous key is retired but stays published in
+        the JWKS until every token it could have signed has expired.
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: The new active key id.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  activeKid: { type: string }
+        "401": { description: Missing or invalid admin token. }
+
   /openapi.yaml:
     get:
       tags: [meta]

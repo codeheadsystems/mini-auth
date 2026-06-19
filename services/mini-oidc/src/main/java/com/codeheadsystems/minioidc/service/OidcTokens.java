@@ -56,6 +56,17 @@ public final class OidcTokens {
     return signingKeys.jwkSet();
   }
 
+  /**
+   * Rotate the signing key: mint a fresh Ed25519 key and make it active. The retired key stays in the
+   * JWKS until every token it could have signed has expired, so in-flight ID/access tokens still
+   * verify. Mirrors mini-idp's rotation — both issuers share mini-token's {@code SigningKeyService}.
+   *
+   * @return the new active key id.
+   */
+  public String rotateSigningKey() {
+    return signingKeys.rotate();
+  }
+
   /** @return the access token audience (the OP's userinfo/resource identifier). */
   public String accessAudience() {
     return accessAudience;

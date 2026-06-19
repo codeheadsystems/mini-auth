@@ -8,6 +8,7 @@ import com.codeheadsystems.miniconsole.server.ConsoleServer;
 import com.codeheadsystems.minica.client.MiniCaClient;
 import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
 import com.codeheadsystems.miniidp.client.MiniIdpClient;
+import com.codeheadsystems.minioidc.client.MiniOidcClient;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -34,6 +35,7 @@ public final class ServerMain {
   static final String ENV_KMS_API_TOKEN = "MINICONSOLE_KMS_API_TOKEN";
   static final String ENV_KMS_ADMIN_TOKEN = "MINICONSOLE_KMS_ADMIN_TOKEN";
   static final String ENV_CA_TOKEN = "MINICONSOLE_CA_TOKEN";
+  static final String ENV_OIDC_TOKEN = "MINICONSOLE_OIDC_TOKEN";
 
   private ServerMain() {
   }
@@ -59,9 +61,10 @@ public final class ServerMain {
     final MiniIdpClient idp = wireIdp(config, env);
     final KeyGroupAdmin keys = wireKms(config, env);
     final MiniCaClient ca = wireCa(config, env);
+    final MiniOidcClient oidc = wireOidc(config, env);
 
-    final ConsoleServer server =
-        ConsoleServer.create(config, consoleToken, directory, idp, keys, ca, Clock.systemUTC());
+    final ConsoleServer server = ConsoleServer.create(
+        config, consoleToken, directory, idp, keys, ca, oidc, Clock.systemUTC());
 
     final CountDownLatch shutdown = new CountDownLatch(1);
     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -157,6 +160,25 @@ public final class ServerMain {
     final String token = TokenResolver.require(env.get(ENV_CA_TOKEN), config.caTokenFilePath(),
         "--ca-url is set but no ca token: set " + ENV_CA_TOKEN + " or provide --ca-token-file");
     return MiniCaClient.http(config.caUrl(), token);
+  }
+
+  /**
+   * Build the mini-oidc client if (and only if) an OIDC URL is configured. The OIDC admin token is
+   * resolved from {@code MINICONSOLE_OIDC_TOKEN} or {@code --oidc-token-file} (console-scoped, never
+   * argv, never logged) and is required once a URL is set (client registration + key rotation need
+   * it; the public discovery/JWKS/token reads do not, but the client holds one token for the admin
+   * surface).
+   *
+   * @return the wired client, or null when mini-oidc is not configured.
+   */
+  private static MiniOidcClient wireOidc(final ConsoleConfig config, final Map<String, String> env)
+      throws IOException {
+    if (config.oidcUrl() == null) {
+      return null;
+    }
+    final String token = TokenResolver.require(env.get(ENV_OIDC_TOKEN), config.oidcTokenFilePath(),
+        "--oidc-url is set but no oidc token: set " + ENV_OIDC_TOKEN + " or provide --oidc-token-file");
+    return MiniOidcClient.http(config.oidcUrl(), token);
   }
 
   private static String resolveToken(final String fromEnv, final Path file, final String missingMessage)

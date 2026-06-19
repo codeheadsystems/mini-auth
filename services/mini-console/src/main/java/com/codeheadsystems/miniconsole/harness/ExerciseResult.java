@@ -61,4 +61,23 @@ public record ExerciseResult(String exerciseId, String title, Status status, Lis
     return new ExerciseResult(exercise.id(), exercise.title(),
         anyFail ? Status.FAIL : Status.PASS, steps, summary);
   }
+
+  /**
+   * Assemble a result whose overall status is SKIP-aware: FAIL if any step failed, else SKIP if any
+   * step was skipped (a partial run — e.g. the OIDC flow that cannot drive a headless passkey login),
+   * else PASS. This keeps a flow honest: a run that could not complete its interactive steps reports
+   * SKIP, never a misleading PASS.
+   *
+   * @param exercise the exercise that ran.
+   * @param steps    the ordered steps.
+   * @param summary  the one-line summary.
+   * @return the assembled result.
+   */
+  public static ExerciseResult ofWithSkips(final Exercise exercise, final List<Step> steps,
+                                           final String summary) {
+    final boolean anyFail = steps.stream().anyMatch(step -> step.status() == Status.FAIL);
+    final boolean anySkip = steps.stream().anyMatch(step -> step.status() == Status.SKIP);
+    final Status overall = anyFail ? Status.FAIL : anySkip ? Status.SKIP : Status.PASS;
+    return new ExerciseResult(exercise.id(), exercise.title(), overall, steps, summary);
+  }
 }
