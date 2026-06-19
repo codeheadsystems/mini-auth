@@ -3,11 +3,15 @@ package com.codeheadsystems.miniconsole.server;
 import com.codeheadsystems.miniclient.common.ClientException;
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
 import com.codeheadsystems.miniconsole.harness.ExerciseResult;
+import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 import com.codeheadsystems.miniconsole.harness.flows.M2mTokenFlow;
+import com.codeheadsystems.miniconsole.kms.KeyAdminException;
+import com.codeheadsystems.miniconsole.kms.KeyGroupAdmin;
 import com.codeheadsystems.miniconsole.pages.AuditPages;
 import com.codeheadsystems.miniconsole.pages.DashboardPage;
 import com.codeheadsystems.miniconsole.pages.HarnessPages;
 import com.codeheadsystems.miniconsole.pages.IdentitiesPages;
+import com.codeheadsystems.miniconsole.pages.KeysPages;
 import com.codeheadsystems.miniconsole.pages.LoginPage;
 import com.codeheadsystems.miniconsole.server.http.ApiException;
 import com.codeheadsystems.miniconsole.server.http.HttpResponse;
@@ -22,11 +26,15 @@ import com.codeheadsystems.minidirectory.client.model.NewRole;
 import com.codeheadsystems.minidirectory.client.model.NewServiceAccount;
 import com.codeheadsystems.minidirectory.client.model.ServiceAccountCreated;
 import com.codeheadsystems.miniidp.client.MiniIdpClient;
+import com.codeheadsystems.minikms.protocol.KeyGroupView;
+import com.codeheadsystems.minitoken.jwks.Jwk;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -57,8 +65,10 @@ public final class ConsoleHandlers {
   private final long sessionTtlSeconds;
   private final MiniDirectoryClient directory;
   private final MiniIdpClient idp;
+  private final KeyGroupAdmin keys;
   private final ExerciseRegistry exercises;
   private final M2mTokenFlow m2mFlow;
+  private final KeyRotationFlow keyRotationFlow;
 
   /**
    * @param session           the console-login session store.
@@ -68,13 +78,16 @@ public final class ConsoleHandlers {
    * @param sessionTtlSeconds the session cookie {@code Max-Age}.
    * @param directory         the mini-directory client, or null when the directory is not configured.
    * @param idp               the mini-idp client, or null when mini-idp is not configured.
+   * @param keys              the KMS key-group admin port, or null when mini-kms is not configured.
    * @param exercises         the exercise registry (for the Harness page listing).
-   * @param m2mFlow           the machine-to-machine token flow (dispatched by the run route).
+   * @param m2mFlow           the machine-to-machine token flow (dispatched by its run route).
+   * @param keyRotationFlow   the signing-key rotation flow (dispatched by its run route).
    */
   public ConsoleHandlers(final ConsoleSession session, final AdminAuthenticator auth,
                          final Cookies cookies, final Csrf csrf, final long sessionTtlSeconds,
                          final MiniDirectoryClient directory, final MiniIdpClient idp,
-                         final ExerciseRegistry exercises, final M2mTokenFlow m2mFlow) {
+                         final KeyGroupAdmin keys, final ExerciseRegistry exercises,
+                         final M2mTokenFlow m2mFlow, final KeyRotationFlow keyRotationFlow) {
     this.session = session;
     this.auth = auth;
     this.cookies = cookies;
@@ -82,8 +95,10 @@ public final class ConsoleHandlers {
     this.sessionTtlSeconds = sessionTtlSeconds;
     this.directory = directory;
     this.idp = idp;
+    this.keys = keys;
     this.exercises = exercises;
     this.m2mFlow = m2mFlow;
+    this.keyRotationFlow = keyRotationFlow;
   }
 
   /** @return the router with the console routes registered. */
@@ -111,6 +126,16 @@ public final class ConsoleHandlers {
         .route("GET", "/audit", this::audit)
         .route("GET", "/harness", this::harness)
         .route("POST", "/harness/m2m-token/run", this::runM2mToken)
+        .route("POST", "/harness/key-rotation/run", this::runKeyRotation)
+        // mini-kms key groups + idp signing-key rotation (Slice 4).
+        .route("GET", "/keys", this::keysPage)
+        .route("POST", "/keys/kms", this::createKeyGroup)
+        .route("POST", "/keys/kms/{group}/rotate", this::rotateKeyGroup)
+        .route("POST", "/keys/kms/{group}/disable", this::disableVersion)
+        .route("POST", "/keys/kms/{group}/enable", this::enableVersion)
+        .route("GET", "/keys/kms/{group}/destroy", this::destroyVersionConfirm)
+        .route("POST", "/keys/kms/{group}/destroy", this::destroyVersion)
+        .route("POST", "/keys/idp/rotate", this::rotateIdpKey)
         .route("POST", "/logout", this::logout);
   }
 
@@ -157,7 +182,7 @@ public final class ConsoleHandlers {
     final String host = context.header("Host");
     final String address = host != null ? host : "loopback";
     return htmlWithCsrf(DashboardPage.render(address, token, directory != null, directoryStatus(),
-        idp != null, idpStatus()), token);
+        idp != null, idpStatus(), keys != null, keysStatus()), token);
   }
 
   /** @return the live mini-directory status line for the Dashboard row (no secret, no oracle). */
@@ -183,6 +208,14 @@ public final class ConsoleHandlers {
     } catch (final ClientException e) {
       return "unreachable";
     }
+  }
+
+  /** @return the live mini-kms status line for the Dashboard row (no secret, no oracle). */
+  private String keysStatus() {
+    if (keys == null) {
+      return "not configured (set --kms-tcp)";
+    }
+    return keys.healthy() ? "healthy" : "unreachable";
   }
 
   /** The Identities list (read-only): principals, groups, and roles from mini-directory. */
@@ -361,12 +394,30 @@ public final class ConsoleHandlers {
     return htmlWithCsrf(HarnessPages.list(exercises, token), token);
   }
 
-  /**
-   * Run the machine-to-machine token flow with the operator-supplied client id + secret. Session-
-   * required and CSRF-guarded; the credentials are used for the single run and never stored or
-   * logged. The rendered result carries only the non-secret facts the flow returned.
-   */
+  /** Run the machine-to-machine token flow with the operator-supplied client id + secret. */
   private HttpResponse runM2mToken(final RequestContext context) {
+    return runExercise(context, (clientId, secret) -> m2mFlow.run(idp, clientId, secret));
+  }
+
+  /**
+   * Run the signing-key rotation flow with the operator-supplied client id + secret. NOTE: this
+   * rotates a real mini-idp signing key (the Harness page warns the operator).
+   */
+  private HttpResponse runKeyRotation(final RequestContext context) {
+    return runExercise(context, (clientId, secret) -> keyRotationFlow.run(idp, clientId, secret));
+  }
+
+  /**
+   * The shared guard for running a harness exercise: session-required and CSRF-guarded, the operator-
+   * supplied credentials are used for the single run and never stored or logged, and the rendered
+   * result carries only the non-secret facts the flow returned.
+   *
+   * @param context the request.
+   * @param runner  the flow, given {@code (clientId, clientSecret)}; returns the result.
+   * @return the result page, or a redirect/not-configured page.
+   */
+  private HttpResponse runExercise(final RequestContext context,
+                                   final BiFunction<String, String, ExerciseResult> runner) {
     final HttpResponse redirect = requireSession(context);
     if (redirect != null) {
       return redirect;
@@ -381,8 +432,167 @@ public final class ConsoleHandlers {
     }
     // The secret lives only for this call; it is never put into the session, a log, or the result.
     final ExerciseResult result =
-        m2mFlow.run(idp, form.getOrDefault("clientId", ""), form.getOrDefault("clientSecret", ""));
+        runner.apply(form.getOrDefault("clientId", ""), form.getOrDefault("clientSecret", ""));
     return htmlWithCsrf(HarnessPages.result(result, token), token);
+  }
+
+  // ---- mini-kms key groups + idp signing-key rotation (Slice 4) -------------------------------
+
+  /** The Keys page: live mini-kms key groups and the mini-idp signing-key status. */
+  private HttpResponse keysPage(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    return keysRerender();
+  }
+
+  /** Re-render the Keys page with a fresh CSRF token (used by GET /keys and after a mutation). */
+  private HttpResponse keysRerender() {
+    final String token = csrf.mint();
+    return htmlWithCsrf(renderKeys(token), token);
+  }
+
+  /** Render the Keys page for the given CSRF token, resolving each backend's live state (no oracle). */
+  private String renderKeys(final String token) {
+    KeysPages.Availability kmsState;
+    List<KeyGroupView> groups = List.of();
+    if (keys == null) {
+      kmsState = KeysPages.Availability.NOT_CONFIGURED;
+    } else {
+      try {
+        groups = keys.listGroups();
+        kmsState = KeysPages.Availability.OK;
+      } catch (final KeyAdminException e) {
+        kmsState = KeysPages.Availability.UNAVAILABLE;
+      }
+    }
+
+    KeysPages.Availability idpState;
+    List<String> kids = List.of();
+    if (idp == null) {
+      idpState = KeysPages.Availability.NOT_CONFIGURED;
+    } else {
+      try {
+        kids = idp.jwks().keys().stream().map(Jwk::keyId).toList();
+        idpState = KeysPages.Availability.OK;
+      } catch (final ClientException e) {
+        idpState = KeysPages.Availability.UNAVAILABLE;
+      }
+    }
+    return KeysPages.render(kmsState, groups, idpState, kids, token);
+  }
+
+  /** Create a KMS key group (CSRF-guarded). */
+  private HttpResponse createKeyGroup(final RequestContext context) {
+    return keysMutate(context, form -> keys.createGroup(requireField(form, "keyId")));
+  }
+
+  /** Rotate a KMS key group — mint a new active version (CSRF-guarded). */
+  private HttpResponse rotateKeyGroup(final RequestContext context) {
+    final String group = context.pathParam("group");
+    return keysMutate(context, form -> keys.rotateGroup(group));
+  }
+
+  /** Disable a non-active KMS key version (CSRF-guarded). */
+  private HttpResponse disableVersion(final RequestContext context) {
+    final String group = context.pathParam("group");
+    return keysMutate(context, form -> keys.disableVersion(group, version(form)));
+  }
+
+  /** Re-enable a disabled KMS key version (CSRF-guarded). */
+  private HttpResponse enableVersion(final RequestContext context) {
+    final String group = context.pathParam("group");
+    return keysMutate(context, form -> keys.enableVersion(group, version(form)));
+  }
+
+  /** Confirm-step page for destroying a KMS key version (GET, no mutation). */
+  private HttpResponse destroyVersionConfirm(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final long version;
+    try {
+      version = Long.parseLong(context.queryParam("version"));
+    } catch (final NumberFormatException e) {
+      throw ApiException.badRequest("invalid version");
+    }
+    final String token = csrf.mint();
+    return htmlWithCsrf(KeysPages.confirmDestroy(context.pathParam("group"), version, token), token);
+  }
+
+  /** Destroy a non-active KMS key version — irreversible (CSRF-guarded, reached via the confirm page). */
+  private HttpResponse destroyVersion(final RequestContext context) {
+    final String group = context.pathParam("group");
+    return keysMutate(context, form -> keys.destroyVersion(group, version(form)));
+  }
+
+  /** Rotate the mini-idp signing key (CSRF-guarded); redirect back to /keys on success. */
+  private HttpResponse rotateIdpKey(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final Map<String, String> form = context.formParams();
+    if (!csrf.verify(context.cookie(Cookies.CSRF), form.get("csrf"))) {
+      throw ApiException.badRequest("invalid or missing CSRF token");
+    }
+    if (idp == null) {
+      return keysRerender();
+    }
+    try {
+      idp.rotateSigningKey();
+      return HttpResponse.redirect("/keys");
+    } catch (final ClientException e) {
+      // A refused admin token and an unreachable IDP look the same — no oracle.
+      return keysRerender();
+    }
+  }
+
+  /**
+   * The shared guard for every KMS key mutation: require a session, short-circuit if no KMS is
+   * configured, verify CSRF before any side effect, run the operation, and Post/Redirect/Get back to
+   * the Keys page. Any {@link KeyAdminException} collapses to a re-render of the current state (no
+   * oracle — the failed operation simply did not happen, with no reason shown).
+   */
+  private HttpResponse keysMutate(final RequestContext context,
+                                  final Consumer<Map<String, String>> action) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final Map<String, String> form = context.formParams();
+    if (!csrf.verify(context.cookie(Cookies.CSRF), form.get("csrf"))) {
+      throw ApiException.badRequest("invalid or missing CSRF token");
+    }
+    if (keys == null) {
+      return keysRerender();
+    }
+    try {
+      action.accept(form);
+      return HttpResponse.redirect("/keys");
+    } catch (final KeyAdminException e) {
+      return keysRerender();
+    }
+  }
+
+  /** Parse the {@code version} form field as a long, or 400 (generic). */
+  private static long version(final Map<String, String> form) {
+    try {
+      return Long.parseLong(form.getOrDefault("version", ""));
+    } catch (final NumberFormatException e) {
+      throw ApiException.badRequest("invalid version");
+    }
+  }
+
+  /** @return the trimmed required field, or 400 (generic) when blank. */
+  private static String requireField(final Map<String, String> form, final String name) {
+    final String value = form.get(name);
+    if (value == null || value.isBlank()) {
+      throw ApiException.badRequest("missing " + name);
+    }
+    return value.trim();
   }
 
   /**

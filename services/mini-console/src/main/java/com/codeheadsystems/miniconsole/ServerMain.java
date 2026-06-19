@@ -1,6 +1,8 @@
 package com.codeheadsystems.miniconsole;
 
 import com.codeheadsystems.miniclient.common.TokenResolver;
+import com.codeheadsystems.miniconsole.kms.KeyGroupAdmin;
+import com.codeheadsystems.miniconsole.kms.KmsKeyGroupAdmin;
 import com.codeheadsystems.miniconsole.server.ConsoleConfig;
 import com.codeheadsystems.miniconsole.server.ConsoleServer;
 import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
@@ -28,6 +30,8 @@ public final class ServerMain {
   static final String ENV_ADMIN_TOKEN = "MINICONSOLE_ADMIN_TOKEN";
   static final String ENV_DIRECTORY_TOKEN = "MINICONSOLE_DIRECTORY_TOKEN";
   static final String ENV_IDP_TOKEN = "MINICONSOLE_IDP_TOKEN";
+  static final String ENV_KMS_API_TOKEN = "MINICONSOLE_KMS_API_TOKEN";
+  static final String ENV_KMS_ADMIN_TOKEN = "MINICONSOLE_KMS_ADMIN_TOKEN";
 
   private ServerMain() {
   }
@@ -51,9 +55,10 @@ public final class ServerMain {
         "no console token configured: set " + ENV_ADMIN_TOKEN + " or provide --admin-token-file");
     final MiniDirectoryClient directory = wireDirectory(config, env);
     final MiniIdpClient idp = wireIdp(config, env);
+    final KeyGroupAdmin keys = wireKms(config, env);
 
     final ConsoleServer server =
-        ConsoleServer.create(config, consoleToken, directory, idp, Clock.systemUTC());
+        ConsoleServer.create(config, consoleToken, directory, idp, keys, Clock.systemUTC());
 
     final CountDownLatch shutdown = new CountDownLatch(1);
     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -107,6 +112,30 @@ public final class ServerMain {
     final String token = TokenResolver.require(env.get(ENV_IDP_TOKEN), config.idpTokenFilePath(),
         "--idp-url is set but no idp token: set " + ENV_IDP_TOKEN + " or provide --idp-token-file");
     return MiniIdpClient.http(config.idpUrl(), token);
+  }
+
+  /**
+   * Build the mini-kms key-group admin if (and only if) a KMS endpoint is configured. Two tokens are
+   * resolved (console-scoped, never argv, never logged): the data-plane API token (for health) and
+   * the control-plane admin token (for key-group operations); both are required once {@code --kms-tcp}
+   * is set.
+   *
+   * @return the wired admin port, or null when mini-kms is not configured.
+   */
+  private static KeyGroupAdmin wireKms(final ConsoleConfig config, final Map<String, String> env)
+      throws IOException {
+    if (!config.kmsConfigured()) {
+      return null;
+    }
+    final String apiToken = TokenResolver.require(env.get(ENV_KMS_API_TOKEN),
+        config.kmsApiTokenFilePath(),
+        "--kms-tcp is set but no KMS API token: set " + ENV_KMS_API_TOKEN
+            + " or provide --kms-api-token-file");
+    final String adminToken = TokenResolver.require(env.get(ENV_KMS_ADMIN_TOKEN),
+        config.kmsAdminTokenFilePath(),
+        "--kms-tcp is set but no KMS admin token: set " + ENV_KMS_ADMIN_TOKEN
+            + " or provide --kms-admin-token-file");
+    return new KmsKeyGroupAdmin(config.kmsHost(), config.kmsPort(), apiToken, adminToken);
   }
 
   private static String resolveToken(final String fromEnv, final Path file, final String missingMessage)

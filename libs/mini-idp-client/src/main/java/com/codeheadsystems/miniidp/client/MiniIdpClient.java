@@ -3,6 +3,7 @@ package com.codeheadsystems.miniidp.client;
 import com.codeheadsystems.miniclient.common.ClientException;
 import com.codeheadsystems.miniidp.client.model.DiscoveryDocument;
 import com.codeheadsystems.miniidp.client.model.HealthStatus;
+import com.codeheadsystems.miniidp.client.model.RotationResult;
 import com.codeheadsystems.miniidp.client.model.TokenResponse;
 import com.codeheadsystems.minitoken.jwks.JwkSet;
 import com.codeheadsystems.minitoken.model.AuditEntry;
@@ -54,6 +55,15 @@ public interface MiniIdpClient {
    * @throws ClientException on any failure (including a refused admin token — no oracle).
    */
   List<AuditEntry> audit();
+
+  /**
+   * Rotate the IDP's signing key: mint a fresh key and make it active. The retired key remains in the
+   * JWKS so in-flight tokens still verify until it ages out.
+   *
+   * @return the new active key id.
+   * @throws ClientException on any failure (including a refused admin token — no oracle).
+   */
+  RotationResult rotateSigningKey();
 
   /**
    * @return the IDP's liveness status.

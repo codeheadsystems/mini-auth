@@ -63,6 +63,7 @@ public final class Layout {
         <nav style="display:flex;gap:1rem;align-items:center">
           <a href="/">Dashboard</a>
           <a href="/identities">Identities</a>
+          <a href="/keys">Keys</a>
           <a href="/audit">Audit</a>
           <a href="/harness">Harness</a>
           <form method="post" action="/logout" style="margin:0">

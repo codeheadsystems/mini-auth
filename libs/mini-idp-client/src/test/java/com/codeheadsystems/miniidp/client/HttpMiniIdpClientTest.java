@@ -13,6 +13,7 @@ import com.codeheadsystems.miniidp.server.ServerConfig;
 import com.codeheadsystems.minitoken.auth.Authorization;
 import com.codeheadsystems.minitoken.auth.Grant;
 import com.codeheadsystems.minitoken.auth.KeyOperation;
+import com.codeheadsystems.minitoken.jwks.Jwk;
 import com.codeheadsystems.minitoken.jwks.JwkSet;
 import com.codeheadsystems.minitoken.service.TokenVerifier;
 import java.net.URI;
@@ -94,6 +95,23 @@ class HttpMiniIdpClientTest {
   @Test
   void token_wrongSecret_collapsesToClientException() {
     assertThrows(ClientException.class, () -> client.token(CLIENT, "not-the-secret"));
+  }
+
+  @Test
+  void rotateSigningKey_publishesNewKidAndRetainsOld() {
+    final List<String> before = client.jwks().keys().stream().map(Jwk::keyId).toList();
+    final String newKid = client.rotateSigningKey().activeKid();
+    final List<String> after = client.jwks().keys().stream().map(Jwk::keyId).toList();
+    assertTrue(after.contains(newKid), "the new active kid must appear in the JWKS");
+    assertTrue(after.containsAll(before), "rotation must retain the previously-published kid(s)");
+    assertFalse(before.contains(newKid), "the rotated-in kid must be genuinely new");
+  }
+
+  @Test
+  void rotateSigningKey_withWrongAdminToken_collapsesToClientException() {
+    final MiniIdpClient badAdmin = MiniIdpClient.http(
+        URI.create("http://127.0.0.1:" + server.address().getPort()), "wrong-admin-token");
+    assertThrows(ClientException.class, badAdmin::rotateSigningKey);
   }
 
   @Test

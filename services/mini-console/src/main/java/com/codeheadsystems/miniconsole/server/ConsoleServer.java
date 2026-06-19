@@ -1,7 +1,9 @@
 package com.codeheadsystems.miniconsole.server;
 
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
+import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 import com.codeheadsystems.miniconsole.harness.flows.M2mTokenFlow;
+import com.codeheadsystems.miniconsole.kms.KeyGroupAdmin;
 import com.codeheadsystems.miniconsole.server.http.Router;
 import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
 import com.codeheadsystems.miniidp.client.MiniIdpClient;
@@ -66,15 +68,13 @@ public final class ConsoleServer {
   }
 
   /**
-   * Build a server, optionally wiring the mini-directory and mini-idp clients.
+   * Build a server wiring the mini-directory and mini-idp clients but no KMS (the Keys page's KMS
+   * section reports "not configured"). Retained for the Slice 1–3 tests.
    *
    * @param config       the resolved configuration.
    * @param consoleToken the bootstrap console token guarding login (resolved from env/file).
    * @param directory    the wired directory client, or null when the directory is not configured.
-   *                     (Tests inject a fake here to exercise the Identities pages without a real
-   *                     directory.)
-   * @param idp          the wired idp client, or null when mini-idp is not configured. (Tests inject
-   *                     a fake here to exercise the Audit/Harness pages without a real IDP.)
+   * @param idp          the wired idp client, or null when mini-idp is not configured.
    * @param clock        the clock shared by the session store and the exercise harness.
    * @return a built, not-yet-started server.
    * @throws IOException if the listening socket cannot be opened.
@@ -82,13 +82,38 @@ public final class ConsoleServer {
   public static ConsoleServer create(final ConsoleConfig config, final String consoleToken,
                                      final MiniDirectoryClient directory, final MiniIdpClient idp,
                                      final Clock clock) throws IOException {
+    return create(config, consoleToken, directory, idp, null, clock);
+  }
+
+  /**
+   * Build a server, optionally wiring the mini-directory, mini-idp, and mini-kms clients.
+   *
+   * @param config       the resolved configuration.
+   * @param consoleToken the bootstrap console token guarding login (resolved from env/file).
+   * @param directory    the wired directory client, or null when the directory is not configured.
+   *                     (Tests inject a fake here to exercise the Identities pages without a real
+   *                     directory.)
+   * @param idp          the wired idp client, or null when mini-idp is not configured. (Tests inject
+   *                     a fake here to exercise the Audit/Harness/Keys pages without a real IDP.)
+   * @param keys         the wired KMS key-group admin, or null when mini-kms is not configured.
+   *                     (Tests inject a fake here to exercise the Keys page without a real KMS.)
+   * @param clock        the clock shared by the session store and the exercise harness.
+   * @return a built, not-yet-started server.
+   * @throws IOException if the listening socket cannot be opened.
+   */
+  public static ConsoleServer create(final ConsoleConfig config, final String consoleToken,
+                                     final MiniDirectoryClient directory, final MiniIdpClient idp,
+                                     final KeyGroupAdmin keys, final Clock clock) throws IOException {
     final ConsoleSession session = new ConsoleSession(config.dataDir(), clock, config.sessionTtl());
-    // The exercise harness: one flow in Slice 3 (the m2m token flow), driven by the wired idp client.
+    // The exercise harness: the m2m token flow (Slice 3) and the signing-key rotation flow (Slice 4),
+    // both driven by the wired idp client.
     final M2mTokenFlow m2mFlow = new M2mTokenFlow(clock);
-    final ExerciseRegistry exercises = new ExerciseRegistry(List.of(m2mFlow));
+    final KeyRotationFlow keyRotationFlow = new KeyRotationFlow(clock);
+    final ExerciseRegistry exercises = new ExerciseRegistry(List.of(m2mFlow, keyRotationFlow));
     final ConsoleHandlers handlers = new ConsoleHandlers(
         session, new AdminAuthenticator(consoleToken), new Cookies(config.secureCookies()),
-        new Csrf(), config.sessionTtl().toSeconds(), directory, idp, exercises, m2mFlow);
+        new Csrf(), config.sessionTtl().toSeconds(), directory, idp, keys, exercises, m2mFlow,
+        keyRotationFlow);
     final Router router = handlers.router();
 
     final HttpServer http = HttpServer.create(new InetSocketAddress(config.host(), config.port()), 0);

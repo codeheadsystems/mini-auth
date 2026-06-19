@@ -3,6 +3,7 @@ package com.codeheadsystems.miniidp.client;
 import com.codeheadsystems.miniclient.common.HttpTransport;
 import com.codeheadsystems.miniidp.client.model.DiscoveryDocument;
 import com.codeheadsystems.miniidp.client.model.HealthStatus;
+import com.codeheadsystems.miniidp.client.model.RotationResult;
 import com.codeheadsystems.miniidp.client.model.TokenResponse;
 import com.codeheadsystems.minitoken.jwks.JwkSet;
 import com.codeheadsystems.minitoken.model.AuditEntry;
@@ -58,6 +59,12 @@ final class HttpMiniIdpClient implements MiniIdpClient {
   @Override
   public List<AuditEntry> audit() {
     return adminTransport.getList("/admin/audit", AuditEntry.class);
+  }
+
+  @Override
+  public RotationResult rotateSigningKey() {
+    // The endpoint takes no request body; mini-idp rotates and returns the new active kid.
+    return adminTransport.post("/admin/keys/rotate", Map.of(), RotationResult.class);
   }
 
   @Override

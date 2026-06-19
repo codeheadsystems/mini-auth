@@ -4,6 +4,7 @@ import com.codeheadsystems.miniclient.common.ClientException;
 import com.codeheadsystems.miniidp.client.MiniIdpClient;
 import com.codeheadsystems.miniidp.client.model.DiscoveryDocument;
 import com.codeheadsystems.miniidp.client.model.HealthStatus;
+import com.codeheadsystems.miniidp.client.model.RotationResult;
 import com.codeheadsystems.miniidp.client.model.TokenResponse;
 import com.codeheadsystems.minitoken.auth.Authorization;
 import com.codeheadsystems.minitoken.crypto.Ed25519Keys;
@@ -31,6 +32,10 @@ final class FakeIdpClient implements MiniIdpClient {
 
   /** When true, {@link #audit()} throws — used to prove the Audit page degrades without an oracle. */
   boolean failAudit;
+  /** When true, {@link #rotateSigningKey()} throws — used to prove the Keys page has no oracle. */
+  boolean failRotate;
+  /** Counts rotation calls so a test can assert the route reached the client. */
+  int rotateCalls;
 
   private final KeyPair keyPair = Ed25519Keys.generate();
 
@@ -60,6 +65,15 @@ final class FakeIdpClient implements MiniIdpClient {
     }
     return List.of(new AuditEntry(Instant.now().getEpochSecond(), "token.issued", "svc_demo",
         "jti=jti-fake"));
+  }
+
+  @Override
+  public RotationResult rotateSigningKey() {
+    rotateCalls++;
+    if (failRotate) {
+      throw new ClientException("rotation unavailable");
+    }
+    return new RotationResult("rotated-kid");
   }
 
   @Override

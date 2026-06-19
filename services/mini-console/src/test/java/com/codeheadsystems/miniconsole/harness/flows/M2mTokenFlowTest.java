@@ -157,6 +157,11 @@ class M2mTokenFlowTest {
     }
 
     @Override
+    public com.codeheadsystems.miniidp.client.model.RotationResult rotateSigningKey() {
+      return new com.codeheadsystems.miniidp.client.model.RotationResult("kid");
+    }
+
+    @Override
     public HealthStatus health() {
       return new HealthStatus("ok");
     }

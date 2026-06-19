@@ -22,6 +22,9 @@ import java.util.Map;
  *   --directory-token-file P  MINICONSOLE_DIRECTORY_TOKEN_FILE file holding the directory admin token (alt: MINICONSOLE_DIRECTORY_TOKEN env)
  *   --idp-url URL             MINICONSOLE_IDP_URL             mini-idp origin to wire (optional)
  *   --idp-token-file PATH     MINICONSOLE_IDP_TOKEN_FILE      file holding the idp admin token (alt: MINICONSOLE_IDP_TOKEN env)
+ *   --kms-tcp HOST:PORT       MINICONSOLE_KMS_TCP             mini-kms loopback endpoint to wire (optional)
+ *   --kms-api-token-file P    MINICONSOLE_KMS_API_TOKEN_FILE  file holding the KMS data-plane token (alt: MINICONSOLE_KMS_API_TOKEN env)
+ *   --kms-admin-token-file P  MINICONSOLE_KMS_ADMIN_TOKEN_FILE file holding the KMS control-plane token (alt: MINICONSOLE_KMS_ADMIN_TOKEN env)
  * </pre>
  *
  * <p><b>Downstream tokens are console-scoped.</b> The console holds a copy of each downstream
@@ -50,10 +53,16 @@ public final class ConsoleConfig {
   private final Path directoryTokenFilePath;
   private final URI idpUrl;
   private final Path idpTokenFilePath;
+  private final String kmsHost;
+  private final int kmsPort;
+  private final Path kmsApiTokenFilePath;
+  private final Path kmsAdminTokenFilePath;
 
   ConsoleConfig(final String host, final int port, final Path dataDir, final Path adminTokenFilePath,
                 final boolean secureCookies, final Duration sessionTtl, final URI directoryUrl,
-                final Path directoryTokenFilePath, final URI idpUrl, final Path idpTokenFilePath) {
+                final Path directoryTokenFilePath, final URI idpUrl, final Path idpTokenFilePath,
+                final String kmsHost, final int kmsPort, final Path kmsApiTokenFilePath,
+                final Path kmsAdminTokenFilePath) {
     this.host = host;
     this.port = port;
     this.dataDir = dataDir;
@@ -64,6 +73,10 @@ public final class ConsoleConfig {
     this.directoryTokenFilePath = directoryTokenFilePath;
     this.idpUrl = idpUrl;
     this.idpTokenFilePath = idpTokenFilePath;
+    this.kmsHost = kmsHost;
+    this.kmsPort = kmsPort;
+    this.kmsApiTokenFilePath = kmsApiTokenFilePath;
+    this.kmsAdminTokenFilePath = kmsAdminTokenFilePath;
   }
 
   /** Resolve configuration from CLI args and the environment. */
@@ -78,6 +91,9 @@ public final class ConsoleConfig {
     String directoryTokenFile = env.get("MINICONSOLE_DIRECTORY_TOKEN_FILE");
     String idpUrl = env.get("MINICONSOLE_IDP_URL");
     String idpTokenFile = env.get("MINICONSOLE_IDP_TOKEN_FILE");
+    String kmsTcp = env.get("MINICONSOLE_KMS_TCP");
+    String kmsApiTokenFile = env.get("MINICONSOLE_KMS_API_TOKEN_FILE");
+    String kmsAdminTokenFile = env.get("MINICONSOLE_KMS_ADMIN_TOKEN_FILE");
 
     for (int i = 0; i < args.length; i++) {
       final String arg = args[i];
@@ -92,6 +108,9 @@ public final class ConsoleConfig {
         case "--directory-token-file" -> directoryTokenFile = requireValue(args, ++i, arg);
         case "--idp-url" -> idpUrl = requireValue(args, ++i, arg);
         case "--idp-token-file" -> idpTokenFile = requireValue(args, ++i, arg);
+        case "--kms-tcp" -> kmsTcp = requireValue(args, ++i, arg);
+        case "--kms-api-token-file" -> kmsApiTokenFile = requireValue(args, ++i, arg);
+        case "--kms-admin-token-file" -> kmsAdminTokenFile = requireValue(args, ++i, arg);
         default -> throw new IllegalArgumentException("unknown argument: " + arg);
       }
     }
@@ -101,6 +120,7 @@ public final class ConsoleConfig {
     if (resolvedPort < 0 || resolvedPort > 65535) {
       throw new IllegalArgumentException("port must be in 0..65535");
     }
+    final String[] kms = parseHostPort(kmsTcp);
 
     return new ConsoleConfig(
         resolvedHost, resolvedPort,
@@ -111,7 +131,27 @@ public final class ConsoleConfig {
         directoryUrl != null && !directoryUrl.isBlank() ? URI.create(directoryUrl.trim()) : null,
         directoryTokenFile != null ? Paths.get(directoryTokenFile) : null,
         idpUrl != null && !idpUrl.isBlank() ? URI.create(idpUrl.trim()) : null,
-        idpTokenFile != null ? Paths.get(idpTokenFile) : null);
+        idpTokenFile != null ? Paths.get(idpTokenFile) : null,
+        kms == null ? null : kms[0], kms == null ? 0 : Integer.parseInt(kms[1]),
+        kmsApiTokenFile != null ? Paths.get(kmsApiTokenFile) : null,
+        kmsAdminTokenFile != null ? Paths.get(kmsAdminTokenFile) : null);
+  }
+
+  /** @return {host, port} parsed from a {@code HOST:PORT} value, or null when not set. */
+  private static String[] parseHostPort(final String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    final int colon = value.lastIndexOf(':');
+    if (colon < 1 || colon == value.length() - 1) {
+      throw new IllegalArgumentException("--kms-tcp must be HOST:PORT");
+    }
+    final String[] parts = {value.substring(0, colon).trim(), value.substring(colon + 1).trim()};
+    final int port = Integer.parseInt(parts[1]);
+    if (port < 1 || port > 65535) {
+      throw new IllegalArgumentException("--kms-tcp port must be in 1..65535");
+    }
+    return parts;
   }
 
   /** @return the loopback bind host. */
@@ -162,6 +202,31 @@ public final class ConsoleConfig {
   /** @return the file the idp admin token may be read from, or null (then the env var). */
   public Path idpTokenFilePath() {
     return idpTokenFilePath;
+  }
+
+  /** @return whether a mini-kms endpoint is configured (then the Keys page's KMS section is live). */
+  public boolean kmsConfigured() {
+    return kmsHost != null;
+  }
+
+  /** @return the mini-kms loopback host, or null if mini-kms is not configured. */
+  public String kmsHost() {
+    return kmsHost;
+  }
+
+  /** @return the mini-kms TCP port (meaningful only when {@link #kmsConfigured()}). */
+  public int kmsPort() {
+    return kmsPort;
+  }
+
+  /** @return the file the KMS data-plane API token may be read from, or null (then the env var). */
+  public Path kmsApiTokenFilePath() {
+    return kmsApiTokenFilePath;
+  }
+
+  /** @return the file the KMS control-plane admin token may be read from, or null (then env). */
+  public Path kmsAdminTokenFilePath() {
+    return kmsAdminTokenFilePath;
   }
 
   private static int positiveOr(final Integer value, final int fallback) {

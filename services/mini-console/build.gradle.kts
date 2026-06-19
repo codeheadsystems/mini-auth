@@ -23,6 +23,11 @@ dependencies {
     // Slice 3: the mini-idp client (token/JWKS/discovery/audit) for the Audit page and the exercise
     // harness. Brings mini-token (JwkSet/AuditEntry/TokenVerifier) transitively on its `api` edge.
     implementation(project(":libs:mini-idp-client"))
+    // Slice 4: reuse the existing mini-kms socket client (KmsClient) for the Keys page's key-group
+    // control plane — the documented socket-era exception, NOT relocated (see docs/DIRECTION.md). Its
+    // dep on mini-kms:core is `implementation`, so we declare core directly for the KeyGroupView DTO.
+    implementation(project(":services:mini-kms:client"))
+    implementation(project(":services:mini-kms:core"))
     // JSON for the session store document (Sessions) and the /health body.
     implementation(libs.jackson.databind)
     // JUnit 5 (jupiter + launcher) is supplied by the convention plugin.

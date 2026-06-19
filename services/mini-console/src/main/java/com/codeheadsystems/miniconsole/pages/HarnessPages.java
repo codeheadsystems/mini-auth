@@ -3,7 +3,7 @@ package com.codeheadsystems.miniconsole.pages;
 import com.codeheadsystems.miniconsole.harness.Exercise;
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
 import com.codeheadsystems.miniconsole.harness.ExerciseResult;
-import com.codeheadsystems.miniconsole.harness.flows.M2mTokenFlow;
+import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 
 /**
  * The Harness pages: a list of end-to-end exercises the operator can run to smoke-test the family,
@@ -21,8 +21,9 @@ public final class HarnessPages {
   }
 
   /**
-   * The Harness landing page: each registered exercise with its description, and (for the m2m flow) a
-   * run form taking a client id + secret.
+   * The Harness landing page: each registered exercise with its description and a run form taking a
+   * client id + secret. The signing-key rotation flow additionally carries a warning that it mutates
+   * mini-idp state.
    *
    * @param registry the registered exercises.
    * @param csrf     the CSRF token for the run form(s) and the nav (escaped here).
@@ -36,9 +37,10 @@ public final class HarnessPages {
       body.append("<section style=\"margin-top:1.5rem\"><h2 style=\"font-size:1.1rem\">")
           .append(Layout.escape(exercise.title())).append("</h2><p class=\"muted\">")
           .append(Layout.escape(exercise.description())).append("</p>");
-      if (M2mTokenFlow.ID.equals(exercise.id())) {
-        body.append(runForm(csrf));
+      if (KeyRotationFlow.ID.equals(exercise.id())) {
+        body.append("<p class=\"warn\">This exercise rotates a real mini-idp signing key.</p>");
       }
+      body.append(runForm(exercise.id(), csrf));
       body.append("</section>");
     }
     return Layout.page("Harness", Layout.authenticatedNav(csrf), body.toString());
@@ -78,15 +80,15 @@ public final class HarnessPages {
     return Layout.page("Harness", Layout.authenticatedNav(csrf), body);
   }
 
-  /** The run form for the m2m flow: a client id and a (password) secret, plus the CSRF token. */
-  private static String runForm(final String csrf) {
+  /** A run form for one exercise: a client id and a (password) secret, plus the CSRF token. */
+  private static String runForm(final String exerciseId, final String csrf) {
     return """
-        <form method="post" action="/harness/m2m-token/run" style="margin-top:.5rem">
+        <form method="post" action="/harness/$ID/run" style="margin-top:.5rem">
           <input type="hidden" name="csrf" value="$CSRF">
           <p><label>Client id<br><input type="text" name="clientId" autocomplete="off"></label></p>
           <p><label>Client secret<br><input type="password" name="clientSecret" autocomplete="off"></label></p>
           <button type="submit">Run</button>
         </form>
-        """.replace("$CSRF", Layout.escape(csrf));
+        """.replace("$ID", Layout.escape(exerciseId)).replace("$CSRF", Layout.escape(csrf));
   }
 }
