@@ -26,19 +26,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Pin the toolchain to JDK 21 (matches the Gradle toolchain the convention plugins request,
       # so no foojay auto-download is needed in CI).
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
 
       # Sets up the Gradle wrapper with build caching keyed on the wrapper + dependency state.
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       # The full gate: compile + test every module in the monorepo.
       - name: Build (compile + test the whole family)
@@ -47,7 +47,7 @@ jobs:
       # Surface JUnit reports as a build artifact when anything fails.
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports
           path: "**/build/reports/tests/**"
