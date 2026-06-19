@@ -1,7 +1,9 @@
 package com.codeheadsystems.miniconsole;
 
+import com.codeheadsystems.miniclient.common.TokenResolver;
 import com.codeheadsystems.miniconsole.server.ConsoleConfig;
 import com.codeheadsystems.miniconsole.server.ConsoleServer;
+import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -23,6 +25,7 @@ import java.util.concurrent.CountDownLatch;
 public final class ServerMain {
 
   static final String ENV_ADMIN_TOKEN = "MINICONSOLE_ADMIN_TOKEN";
+  static final String ENV_DIRECTORY_TOKEN = "MINICONSOLE_DIRECTORY_TOKEN";
 
   private ServerMain() {
   }
@@ -44,8 +47,10 @@ public final class ServerMain {
     final ConsoleConfig config = ConsoleConfig.resolve(args, env);
     final String consoleToken = resolveToken(env.get(ENV_ADMIN_TOKEN), config.adminTokenFilePath(),
         "no console token configured: set " + ENV_ADMIN_TOKEN + " or provide --admin-token-file");
+    final MiniDirectoryClient directory = wireDirectory(config, env);
 
-    final ConsoleServer server = ConsoleServer.create(config, consoleToken, Clock.systemUTC());
+    final ConsoleServer server =
+        ConsoleServer.create(config, consoleToken, directory, Clock.systemUTC());
 
     final CountDownLatch shutdown = new CountDownLatch(1);
     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -61,6 +66,26 @@ public final class ServerMain {
         + server.address().getPort() + "/login");
     System.out.println("Press Ctrl-C to stop.");
     awaitShutdown(shutdown);
+  }
+
+  /**
+   * Build the mini-directory client if (and only if) a directory URL is configured. The directory
+   * admin token is resolved from {@code MINICONSOLE_DIRECTORY_TOKEN} or {@code --directory-token-file}
+   * (console-scoped, never argv, never logged) and is required once a URL is set.
+   *
+   * @return the wired client, or null when the directory is not configured (the console then shows
+   *     "directory not configured" rather than failing to start).
+   */
+  private static MiniDirectoryClient wireDirectory(final ConsoleConfig config,
+                                                   final Map<String, String> env) throws IOException {
+    if (config.directoryUrl() == null) {
+      return null;
+    }
+    final String token = TokenResolver.require(env.get(ENV_DIRECTORY_TOKEN),
+        config.directoryTokenFilePath(),
+        "--directory-url is set but no directory token: set " + ENV_DIRECTORY_TOKEN
+            + " or provide --directory-token-file");
+    return MiniDirectoryClient.http(config.directoryUrl(), token);
   }
 
   private static String resolveToken(final String fromEnv, final Path file, final String missingMessage)

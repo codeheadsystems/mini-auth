@@ -64,3 +64,5 @@ include("services:mini-console")
 // --- Libraries (shared, no transport) --------------------------------------------------
 include("libs:mini-token")
 include("libs:mini-policy")
+include("libs:mini-client-common")
+include("libs:mini-directory-client")

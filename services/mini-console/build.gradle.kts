@@ -1,11 +1,12 @@
 /*
  * mini-console - the optional unified admin console over the mini- family.
  *
- * Slice 0: the runnable skeleton — a loopback HTTP server, a console-login session, and a Dashboard
- * that honestly reports "client not wired yet" for each downstream service (no client libs exist
- * yet). It invents NO new authority; later slices add the per-service client libraries + pages.
+ * A loopback HTTP server with a console-login session and server-rendered admin pages. It invents NO
+ * new authority — it is a client of admin surfaces that already exist. Slice 0 was the skeleton;
+ * Slice 1 wires the first real client (mini-directory) and the read-only Identities pages. Each later
+ * slice adds another per-service client library + its pages.
  *
- * Graduates from library-conventions to application-conventions (it is now runnable).
+ * Uses application-conventions (it is runnable).
  */
 
 plugins {
@@ -14,8 +15,11 @@ plugins {
 
 dependencies {
     // The shared browser-session mechanism (SessionService) + the DocumentStore SPI the copied
-    // JsonStore implements. This is the ONLY family dependency Slice 0 genuinely needs.
+    // JsonStore implements.
     implementation(project(":libs:mini-token"))
+    // The first downstream client: read mini-directory identities/groups/roles + resolution. Brings
+    // mini-client-common (HttpTransport + ClientException) transitively on its `api` edge.
+    implementation(project(":libs:mini-directory-client"))
     // JSON for the session store document (Sessions) and the /health body.
     implementation(libs.jackson.databind)
     // JUnit 5 (jupiter + launcher) is supplied by the convention plugin.

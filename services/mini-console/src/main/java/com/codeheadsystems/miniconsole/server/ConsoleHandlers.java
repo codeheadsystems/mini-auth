@@ -1,16 +1,20 @@
 package com.codeheadsystems.miniconsole.server;
 
+import com.codeheadsystems.miniclient.common.ClientException;
 import com.codeheadsystems.miniconsole.pages.DashboardPage;
+import com.codeheadsystems.miniconsole.pages.IdentitiesPages;
 import com.codeheadsystems.miniconsole.pages.LoginPage;
 import com.codeheadsystems.miniconsole.server.http.ApiException;
 import com.codeheadsystems.miniconsole.server.http.HttpResponse;
 import com.codeheadsystems.miniconsole.server.http.RequestContext;
 import com.codeheadsystems.miniconsole.server.http.Router;
+import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
 import java.util.Map;
 
 /**
- * The Slice 0 route table: a public health check, a paste-the-token login that mints a session, an
- * authenticated Dashboard, and logout.
+ * The console route table: a public health check, a paste-the-token login that mints a session, an
+ * authenticated Dashboard, and (from Slice 1) the read-only Identities pages backed by the
+ * mini-directory client.
  *
  * <p>Auth model: the console token is the bootstrap credential, presented once by being pasted into
  * the {@code /login} form (constant-time compared, never logged). On success the console mints a
@@ -18,6 +22,10 @@ import java.util.Map;
  * {@code /login} and {@code /health} requires a valid session, else a browser-friendly 302 to
  * {@code /login} (no 401 body, no oracle). State-changing POSTs ({@code /login}, {@code /logout})
  * carry a double-submit {@link Csrf} token.
+ *
+ * <p>The {@link MiniDirectoryClient} is optional: when the directory is not configured the Identities
+ * pages and the Dashboard row say so rather than failing. Any directory call that throws collapses to
+ * a generic "unavailable" page — no oracle (a missing principal and a refused token look the same).
  */
 public final class ConsoleHandlers {
 
@@ -29,6 +37,7 @@ public final class ConsoleHandlers {
   private final Cookies cookies;
   private final Csrf csrf;
   private final long sessionTtlSeconds;
+  private final MiniDirectoryClient directory;
 
   /**
    * @param session           the console-login session store.
@@ -36,23 +45,28 @@ public final class ConsoleHandlers {
    * @param cookies           the cookie builder (console-specific names).
    * @param csrf              the double-submit CSRF helper.
    * @param sessionTtlSeconds the session cookie {@code Max-Age}.
+   * @param directory         the mini-directory client, or null when the directory is not configured.
    */
   public ConsoleHandlers(final ConsoleSession session, final AdminAuthenticator auth,
-                         final Cookies cookies, final Csrf csrf, final long sessionTtlSeconds) {
+                         final Cookies cookies, final Csrf csrf, final long sessionTtlSeconds,
+                         final MiniDirectoryClient directory) {
     this.session = session;
     this.auth = auth;
     this.cookies = cookies;
     this.csrf = csrf;
     this.sessionTtlSeconds = sessionTtlSeconds;
+    this.directory = directory;
   }
 
-  /** @return the router with the Slice 0 routes registered. */
+  /** @return the router with the console routes registered. */
   public Router router() {
     return new Router()
         .route("GET", "/health", this::health)
         .route("GET", "/login", this::loginForm)
         .route("POST", "/login", this::loginSubmit)
         .route("GET", "/", this::dashboard)
+        .route("GET", "/identities", this::identities)
+        .route("GET", "/identities/{id}", this::identityDetail)
         .route("POST", "/logout", this::logout);
   }
 
@@ -95,12 +109,62 @@ public final class ConsoleHandlers {
     if (redirect != null) {
       return redirect;
     }
-    // A fresh CSRF token for the logout form (double-submit).
     final String token = csrf.mint();
     final String host = context.header("Host");
     final String address = host != null ? host : "loopback";
-    return HttpResponse.html(DashboardPage.render(address, token))
-        .header("Set-Cookie", cookies.csrf(token, CSRF_TTL_SECONDS));
+    return htmlWithCsrf(DashboardPage.render(address, token, directory != null, directoryStatus()),
+        token);
+  }
+
+  /** @return the live mini-directory status line for the Dashboard row (no secret, no oracle). */
+  private String directoryStatus() {
+    if (directory == null) {
+      return "not configured (set --directory-url)";
+    }
+    try {
+      return "healthy (" + directory.health().status() + ")";
+    } catch (final ClientException e) {
+      // Reachability problem — report it generically; never leak the cause.
+      return "unreachable";
+    }
+  }
+
+  /** The Identities list (read-only): principals, groups, and roles from mini-directory. */
+  private HttpResponse identities(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (directory == null) {
+      return htmlWithCsrf(IdentitiesPages.notConfigured(token), token);
+    }
+    try {
+      return htmlWithCsrf(IdentitiesPages.list(directory.listAccounts(), directory.listGroups(),
+          directory.listRoles(), token), token);
+    } catch (final ClientException e) {
+      return htmlWithCsrf(IdentitiesPages.unavailable(token), token);
+    }
+  }
+
+  /** One principal's detail plus its resolved (fully-expanded) grants. */
+  private HttpResponse identityDetail(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (directory == null) {
+      return htmlWithCsrf(IdentitiesPages.notConfigured(token), token);
+    }
+    final String id = context.pathParam("id");
+    try {
+      return htmlWithCsrf(
+          IdentitiesPages.detail(directory.getAccount(id), directory.resolve(id), token), token);
+    } catch (final ClientException e) {
+      // Not-found and any other failure collapse to one generic page — no oracle.
+      return htmlWithCsrf(IdentitiesPages.unavailable(token), token);
+    }
   }
 
   /** Destroy the session and clear the cookie; requires a valid session + CSRF. */
@@ -127,5 +191,10 @@ public final class ConsoleHandlers {
       return HttpResponse.redirect("/login");
     }
     return null;
+  }
+
+  /** Serve an authenticated HTML page, setting the fresh CSRF cookie its forms (logout) double-submit. */
+  private HttpResponse htmlWithCsrf(final String html, final String csrfToken) {
+    return HttpResponse.html(html).header("Set-Cookie", cookies.csrf(csrfToken, CSRF_TTL_SECONDS));
   }
 }

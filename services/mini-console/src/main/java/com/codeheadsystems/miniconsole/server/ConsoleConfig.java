@@ -1,5 +1,6 @@
 package com.codeheadsystems.miniconsole.server;
 
+import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -8,8 +9,7 @@ import java.util.Map;
 /**
  * Resolved server configuration for the admin console. Values come from CLI flags (highest
  * priority), then environment variables, then per-user defaults — mirroring the family's other
- * {@code ServerConfig}s, trimmed to what a console needs (it has no issuer/argon/KMS knobs in
- * Slice 0).
+ * {@code ServerConfig}s, trimmed to what a console needs.
  *
  * <pre>
  *   --host H                  MINICONSOLE_HOST                loopback bind host (default 127.0.0.1)
@@ -18,7 +18,16 @@ import java.util.Map;
  *   --admin-token-file PATH   MINICONSOLE_ADMIN_TOKEN_FILE    file holding the console token (alt: MINICONSOLE_ADMIN_TOKEN env)
  *   --secure-cookies          MINICONSOLE_SECURE_COOKIES      set the Secure flag on cookies (use behind TLS)
  *   --session-ttl-seconds N   MINICONSOLE_SESSION_TTL_SECONDS console-login session lifetime (default 43200 = 12h)
+ *   --directory-url URL       MINICONSOLE_DIRECTORY_URL       mini-directory origin to wire (optional)
+ *   --directory-token-file P  MINICONSOLE_DIRECTORY_TOKEN_FILE file holding the directory admin token (alt: MINICONSOLE_DIRECTORY_TOKEN env)
  * </pre>
+ *
+ * <p><b>Downstream tokens are console-scoped.</b> The console holds a copy of each downstream
+ * service's admin token to call it on the operator's behalf. These use {@code MINICONSOLE_*} names
+ * (e.g. {@code MINICONSOLE_DIRECTORY_TOKEN}), NOT the downstream service's own var (e.g.
+ * {@code MINIDIR_ADMIN_TOKEN}) — so a co-hosted console never silently inherits another service's
+ * environment, and the held-token concentration is explicit. (A refinement of the design doc's §6,
+ * which used the downstream var names as shorthand.)
  */
 public final class ConsoleConfig {
 
@@ -35,15 +44,20 @@ public final class ConsoleConfig {
   private final Path adminTokenFilePath;
   private final boolean secureCookies;
   private final Duration sessionTtl;
+  private final URI directoryUrl;
+  private final Path directoryTokenFilePath;
 
   ConsoleConfig(final String host, final int port, final Path dataDir, final Path adminTokenFilePath,
-                final boolean secureCookies, final Duration sessionTtl) {
+                final boolean secureCookies, final Duration sessionTtl, final URI directoryUrl,
+                final Path directoryTokenFilePath) {
     this.host = host;
     this.port = port;
     this.dataDir = dataDir;
     this.adminTokenFilePath = adminTokenFilePath;
     this.secureCookies = secureCookies;
     this.sessionTtl = sessionTtl;
+    this.directoryUrl = directoryUrl;
+    this.directoryTokenFilePath = directoryTokenFilePath;
   }
 
   /** Resolve configuration from CLI args and the environment. */
@@ -54,6 +68,8 @@ public final class ConsoleConfig {
     String adminTokenFile = env.get("MINICONSOLE_ADMIN_TOKEN_FILE");
     boolean secureCookies = "true".equalsIgnoreCase(env.get("MINICONSOLE_SECURE_COOKIES"));
     Integer sessionTtl = envInt(env, "MINICONSOLE_SESSION_TTL_SECONDS");
+    String directoryUrl = env.get("MINICONSOLE_DIRECTORY_URL");
+    String directoryTokenFile = env.get("MINICONSOLE_DIRECTORY_TOKEN_FILE");
 
     for (int i = 0; i < args.length; i++) {
       final String arg = args[i];
@@ -64,6 +80,8 @@ public final class ConsoleConfig {
         case "--admin-token-file" -> adminTokenFile = requireValue(args, ++i, arg);
         case "--secure-cookies" -> secureCookies = true;
         case "--session-ttl-seconds" -> sessionTtl = Integer.parseInt(requireValue(args, ++i, arg));
+        case "--directory-url" -> directoryUrl = requireValue(args, ++i, arg);
+        case "--directory-token-file" -> directoryTokenFile = requireValue(args, ++i, arg);
         default -> throw new IllegalArgumentException("unknown argument: " + arg);
       }
     }
@@ -79,7 +97,9 @@ public final class ConsoleConfig {
         dataDir != null ? Paths.get(dataDir) : defaultDataDir(env),
         adminTokenFile != null ? Paths.get(adminTokenFile) : null,
         secureCookies,
-        Duration.ofSeconds(positiveOr(sessionTtl, DEFAULT_SESSION_TTL_SECONDS)));
+        Duration.ofSeconds(positiveOr(sessionTtl, DEFAULT_SESSION_TTL_SECONDS)),
+        directoryUrl != null && !directoryUrl.isBlank() ? URI.create(directoryUrl.trim()) : null,
+        directoryTokenFile != null ? Paths.get(directoryTokenFile) : null);
   }
 
   /** @return the loopback bind host. */
@@ -110,6 +130,16 @@ public final class ConsoleConfig {
   /** @return the console-login session lifetime. */
   public Duration sessionTtl() {
     return sessionTtl;
+  }
+
+  /** @return the mini-directory origin to wire, or null if the directory is not configured. */
+  public URI directoryUrl() {
+    return directoryUrl;
+  }
+
+  /** @return the file the directory admin token may be read from, or null (then the env var). */
+  public Path directoryTokenFilePath() {
+    return directoryTokenFilePath;
   }
 
   private static int positiveOr(final Integer value, final int fallback) {

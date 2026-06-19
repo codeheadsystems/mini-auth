@@ -1,6 +1,7 @@
 package com.codeheadsystems.miniconsole.server;
 
 import com.codeheadsystems.miniconsole.server.http.Router;
+import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -15,8 +16,9 @@ import java.util.concurrent.Executors;
  * the cookie/CSRF helpers, and the route table ({@link ConsoleHandlers}), then binds loopback and
  * serves each request on a virtual thread — exactly as the family's other servers do.
  *
- * <p>The console adds no new authority: Slice 0 holds only its own bootstrap console token and a
- * session store; the Dashboard calls nothing downstream.
+ * <p>The console adds no new authority: it holds its own bootstrap console token, a session store,
+ * and (from Slice 1) a copy of each wired downstream service's admin token, used only to read
+ * surfaces that already exist.
  */
 public final class ConsoleServer {
 
@@ -29,7 +31,8 @@ public final class ConsoleServer {
   }
 
   /**
-   * Build a server from configuration and the resolved console token.
+   * Build a server with no downstream clients wired (the Dashboard reports every service as not
+   * configured). Retained for tests and the bare quickstart.
    *
    * @param config       the resolved configuration.
    * @param consoleToken the bootstrap console token guarding login (resolved from env/file).
@@ -39,10 +42,28 @@ public final class ConsoleServer {
    */
   public static ConsoleServer create(final ConsoleConfig config, final String consoleToken,
                                      final Clock clock) throws IOException {
+    return create(config, consoleToken, null, clock);
+  }
+
+  /**
+   * Build a server, optionally wiring the mini-directory client.
+   *
+   * @param config       the resolved configuration.
+   * @param consoleToken the bootstrap console token guarding login (resolved from env/file).
+   * @param directory    the wired directory client, or null when the directory is not configured.
+   *                     (Tests inject a fake here to exercise the Identities pages without a real
+   *                     directory.)
+   * @param clock        the clock shared by the session store.
+   * @return a built, not-yet-started server.
+   * @throws IOException if the listening socket cannot be opened.
+   */
+  public static ConsoleServer create(final ConsoleConfig config, final String consoleToken,
+                                     final MiniDirectoryClient directory, final Clock clock)
+      throws IOException {
     final ConsoleSession session = new ConsoleSession(config.dataDir(), clock, config.sessionTtl());
     final ConsoleHandlers handlers = new ConsoleHandlers(
         session, new AdminAuthenticator(consoleToken), new Cookies(config.secureCookies()),
-        new Csrf(), config.sessionTtl().toSeconds());
+        new Csrf(), config.sessionTtl().toSeconds(), directory);
     final Router router = handlers.router();
 
     final HttpServer http = HttpServer.create(new InetSocketAddress(config.host(), config.port()), 0);

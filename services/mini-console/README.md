@@ -6,16 +6,17 @@ mini-kms key groups, instead of curling each service's admin API by hand. It is 
 harness** for smoke-testing a deployment end to end. It adds **no new authority** — it is a client of
 admin surfaces that already exist.
 
-> **Status: Slice 0 — runnable skeleton.** This is the first implemented slice. It is a real,
-> runnable server (loopback HTTP, a paste-the-token login that mints a session, a Dashboard) — but
-> **the data layer is intentionally stubbed**: no per-service client libraries exist yet, so the
-> Dashboard honestly reports `n/a — client not wired yet` for each of the six services. Later slices
-> add the client libs + pages (identities, keys, audit, certificates) and the exercise harness. The
-> full design is in [`docs/design/mini-console.md`](../../docs/design/mini-console.md); the Slice 0
-> plan is in [`docs/design/mini-console-slice0.md`](../../docs/design/mini-console-slice0.md). A
-> proper teaching README replaces this one once the screens exist.
+> **Status: Slice 1 — first live service (mini-directory).** A real, runnable server (loopback HTTP,
+> a paste-the-token login that mints a session, a Dashboard) with the **first downstream client
+> wired**: read-only **Identities** pages backed by `mini-directory-client`. The remaining five
+> services are still honest placeholders — the Dashboard reports `n/a — client not wired yet` for
+> each, calling nothing downstream. Later slices add their client libs + pages (keys, audit,
+> certificates) and the exercise harness. The full design is in
+> [`docs/design/mini-console.md`](../../docs/design/mini-console.md); the Slice 0 plan is in
+> [`docs/design/mini-console-slice0.md`](../../docs/design/mini-console-slice0.md). A proper teaching
+> README replaces this one once the screens exist.
 
-## What's here in Slice 0
+## What's here
 
 - A loopback `HttpServer` (one virtual thread per request), bound `127.0.0.1` by default.
 - **Console login:** the operator pastes the bootstrap console token into a form; it is compared in
@@ -24,19 +25,27 @@ admin surfaces that already exist.
   console-specific `mini-console-session` (deliberately **not** the family SSO cookie, so the two
   never collide on a shared host). Every page but `/login` and `/health` requires a valid session.
 - **CSRF** (double-submit cookie) on the login and logout POSTs.
-- A **Dashboard** that lists the six services, each marked "client not wired yet" — it calls nothing
-  downstream and fabricates no data (the honest seam).
+- **Identities (read-only)** — when `--directory-url` is set, `/identities` lists principals, groups,
+  and roles from mini-directory, and `/identities/{id}` shows one principal plus its **resolved**
+  (fully-expanded) grants. Backed by `libs/mini-directory-client` over `libs/mini-client-common`'s
+  no-oracle `HttpTransport`. Without a directory configured the page says so (an honest seam, not an
+  error). No secret is ever rendered.
+- A **Dashboard** with mini-directory's row **live** (real `health()`), the other five services
+  still marked "client not wired yet" — it fabricates no data.
 
 ## Run it locally
 
 The bootstrap console token comes from an env var or a file, **never a CLI arg, and is never
-logged**. Loopback by default.
+logged**. Loopback by default. To wire mini-directory, set `--directory-url` and a console-scoped
+directory token (`MINICONSOLE_DIRECTORY_TOKEN` or `--directory-token-file`).
 
 ```bash
 export MINICONSOLE_ADMIN_TOKEN="$(openssl rand -hex 32)"
+export MINICONSOLE_DIRECTORY_TOKEN="$MINIDIR_ADMIN_TOKEN"   # the directory's admin token, held by the console
 ./gradlew :services:mini-console:installDist
-services/mini-console/build/install/mini-console/bin/mini-console --port 8500 --data-dir ~/.mini-console
-# Sign in at http://127.0.0.1:8500/login  (health check: http://127.0.0.1:8500/health)
+services/mini-console/build/install/mini-console/bin/mini-console --port 8500 --data-dir ~/.mini-console \
+  --directory-url http://127.0.0.1:8466
+# Sign in at http://127.0.0.1:8500/login  (health: /health, identities: /identities)
 ```
 
 ## Building & testing

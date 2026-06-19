@@ -49,6 +49,26 @@ public final class Layout {
   }
 
   /**
+   * The nav shown on every authenticated page: links to the Dashboard and Identities, plus the
+   * CSRF-protected sign-out form. Passed as the {@code navHtml} to {@link #page}.
+   *
+   * @param csrf the CSRF token for the sign-out form (escaped here).
+   * @return the nav markup.
+   */
+  public static String authenticatedNav(final String csrf) {
+    return """
+        <nav style="display:flex;gap:1rem;align-items:center">
+          <a href="/">Dashboard</a>
+          <a href="/identities">Identities</a>
+          <form method="post" action="/logout" style="margin:0">
+            <input type="hidden" name="csrf" value="$CSRF">
+            <button type="submit">Sign out</button>
+          </form>
+        </nav>
+        """.replace("$CSRF", escape(csrf));
+  }
+
+  /**
    * HTML-escape a value for safe interpolation into element text or an attribute. Copied verbatim
    * from mini-oidc's {@code LoginPages.escape}.
    *
