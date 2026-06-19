@@ -429,16 +429,16 @@
    Humans (browser)                      Services / workloads
         │                                       │
         ▼                                       ▼
-   ┌───────────┐                          ┌───────────┐
-   │ mini-oidc │  human SSO (PKCE,        │ mini-idp  │  machine tokens
-   │           │  passkeys via pk-auth)   │           │  (client-credentials)
-   └─────┬─────┘                          └─────┬─────┘
-         │     both resolve identities from     │
+   ┌───────────┐                           ┌───────────┐
+   │ mini-oidc │  human SSO (PKCE,         │ mini-idp  │  machine tokens
+   │           │  passkeys via pk-auth)    │           │  (client-credentials)
+   └─────┬─────┘                           └─────┬─────┘
+         │     both resolve identities from      │
          │     mini-directory, mint through ─────┤
          ▼                                       ▼
-   ╔══════════════════════════════════════════════════╗
+   ╔═══════════════════════════════════════════════════╗
    ║  mini-token   —  JWS · JWKS · rotation · sessions ║
-   ╚════════════════════════┬═════════════════════════╝
+   ╚════════════════════════┬══════════════════════════╝
                             │  signing keys wrapped by
                             ▼
                       ┌───────────┐
