@@ -53,6 +53,13 @@ an action name doesn't accidentally widen access — it silently fails closed. T
 most important security property of the model, and it's enforced by the *structure* (the loop
 returns DENY when nothing matches), not by a check someone has to remember to write.
 
+Deny-by-default is the *mechanism*; the *principle* behind it is **[least privilege](../GLOSSARY.md#identity--authorization)** — give each principal the minimum authority it needs and no more. That's why grants
+are narrow `(action, resource)` pairs rather than broad roles, and why you should be sparing with the
+`*` wildcards and with the admin bypass below: each one is standing authority that turns a single
+compromise into a wide one. Admin-bypass is a deliberate, blunt capability — fine for the family's
+small surface, but in a larger system a global "admin can do anything" bit is itself a least-privilege
+violation and a fat target, usually replaced by scoped admin grants.
+
 ### The two trivial engines, and why both exist
 
 - `AllowAllPolicyEngine` — permits everything. mini-kms ships this today (a single shared data-plane

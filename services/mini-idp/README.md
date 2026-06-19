@@ -113,7 +113,7 @@ Tokens are compact JWS with the header `{"alg":"EdDSA","typ":"JWT","kid":"<kid>"
   "jti": "cWmkyGso5MJdbXpVHu-MMQ",  // unique id (used for revocation)
   "grants": {                       // the authorization payload
     "control": false,               //   -> mini-kms Principal.admin
-    "groups": [                     //   -> mini-kms KeyAuthorizationPolicy
+    "groups": [                     //   -> per-key-group PolicyEngine decision (mini-policy)
       { "keyGroup": "billing", "operations": ["ENCRYPT", "DECRYPT"] }
     ]
   }
@@ -127,7 +127,7 @@ Tokens are compact JWS with the header `{"alg":"EdDSA","typ":"JWT","kid":"<kid>"
 ```
 sub             -> Principal.id
 grants.control  -> Principal.admin
-grants.groups[] -> per-key-group KeyAuthorizationPolicy decisions
+grants.groups[] -> per-key-group PolicyEngine decisions (mini-policy)
 ```
 
 ### How to verify a token offline

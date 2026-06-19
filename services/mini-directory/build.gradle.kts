@@ -7,8 +7,9 @@
  *
  * It exposes a small loopback admin API following the family's conventions (admin bearer token,
  * atomic 0600 JSON store, no secrets in logs) and ships an OpenAPI spec + vendored Swagger UI like
- * mini-idp. mini-oidc (humans) and mini-idp (machines) are intended to READ identities/grants from
- * here later; today the service stands alone.
+ * mini-idp. mini-idp reads service accounts from here today (it has no local client registry —
+ * every token request authenticates against this service); mini-oidc resolves humans from here
+ * when started with --directory-url (optional, in-memory fallback otherwise).
  */
 
 plugins {

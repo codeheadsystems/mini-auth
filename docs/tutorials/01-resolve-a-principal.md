@@ -133,7 +133,7 @@ curl -s -o /dev/null -w "%{http_code}\n" "$B/admin/principals/nobody/resolution"
 
 - Add `grafana-editor`'s grant to `alice` *directly* as well, re-resolve, and confirm dedup keeps
   `edit:grafana` once.
-- Give Alice `"admin": true` (via `POST /admin/principals/alice/assignment`) and re-read the concept
+- Give Alice `"admin": true` (via `PUT /admin/principals/alice/assignment`) and re-read the concept
   doc's "admin bypass" rule — what would a `GrantBasedPolicyEngine` now decide for *any* action?
 - Delete the `grafana-viewer` role, then re-resolve Alice. The dangling reference is **skipped, not
   fatal** — `view:grafana` simply disappears. (See `resolve(...)` in `DirectoryService`.)

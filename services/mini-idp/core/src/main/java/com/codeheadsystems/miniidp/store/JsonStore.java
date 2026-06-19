@@ -18,14 +18,15 @@ import java.util.Set;
  *
  * <p>This is mini-idp's file-backed implementation of mini-token's
  * {@link com.codeheadsystems.minitoken.store.DocumentStore} SPI, and the storage primitive for
- * every mini-idp persisted document — the client registry plus the token plane's signing-key set,
- * revocation denylist, and audit log. It is a direct mirror of mini-kms's {@code Keystore}: writes
+ * every mini-idp persisted document — the token plane's signing-key set, revocation denylist, and
+ * audit log. (The client registry moved to mini-directory; mini-idp keeps no local registry.) It
+ * is a direct mirror of mini-kms's {@code Keystore}: writes
  * go to a temp file in the same directory, get their
  * permissions restricted, and are then swapped into place with {@link StandardCopyOption#ATOMIC_MOVE}
  * so a crash mid-write can never leave a half-written or world-readable file.
  *
- * <p>0600 matters most for the signing-key file (it holds private Ed25519 keys) and the client
- * registry (it holds secret hashes). We apply it uniformly. A real deployment would additionally
+ * <p>0600 matters most for the signing-key file (it holds private Ed25519 keys). We apply it
+ * uniformly. A real deployment would additionally
  * wrap the private signing keys under a KMS — that is the eventual recursive integration with
  * mini-kms and is intentionally out of scope here.
  *

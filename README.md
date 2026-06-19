@@ -13,15 +13,14 @@ mini-auth is two things:
    of the family: the vision, the catalog, the architecture, the recursive integrations, the open
    design questions, and the roadmap — the full architecture reference.
 
-> 🎓 **Want to learn how auth works (not just read the code)? Start with
-> [docs/TEACHING.md](docs/TEACHING.md)** — a course-style track (concepts → hands-on labs →
-> security) that teaches authentication & authorization using the family as the worked example.
+> 🎓 **New here? Start with [docs/TEACHING.md](docs/TEACHING.md).** It's a course-style track
+> (concepts → hands-on labs → security) that teaches authentication & authorization using the family
+> as the worked example, and it routes you to the right next step in one screen.
 >
-> 🧭 **Prefer to read the source in order? [docs/LEARNING.md](docs/LEARNING.md)** is a guided reading
-> order that walks the family in dependency order, naming the concept each stop teaches. Keep
-> **[docs/GLOSSARY.md](docs/GLOSSARY.md)** open for the crypto / OAuth / OIDC vocabulary, and read
-> [docs/DIRECTION.md](docs/DIRECTION.md) once you want the whole architecture map.
-> *(Concepts-first → `TEACHING.md`; code-first → `LEARNING.md`.)*
+> It links you onward to the other entry points when you need them: **[docs/LEARNING.md](docs/LEARNING.md)**
+> if you'd rather read the *source* in dependency order (code-first instead of concepts-first),
+> **[docs/GLOSSARY.md](docs/GLOSSARY.md)** for the crypto / OAuth / OIDC vocabulary, and
+> **[docs/DIRECTION.md](docs/DIRECTION.md)** for the whole architecture map.
 
 > ⚠️ **Educational project.** The family uses real, sound cryptographic constructions but is **not
 > audited** and is not a substitute for production identity infrastructure. Six services and both

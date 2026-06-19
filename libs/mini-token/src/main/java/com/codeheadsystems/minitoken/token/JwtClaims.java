@@ -12,8 +12,8 @@ import java.util.Map;
  * <ul>
  *   <li>{@code grants} — the authorization payload ({@link GrantsClaim}): control-plane flag and
  *       per-key-group operations. A verifier maps {@code sub} → {@code Principal.id},
- *       {@code grants.control} → {@code Principal.admin}, and {@code grants.groups} → its
- *       {@code KeyAuthorizationPolicy}.</li>
+ *       {@code grants.control} → {@code Principal.admin}, and {@code grants.groups} → a
+ *       per-key-group {@code PolicyEngine} decision (mini-policy).</li>
  *   <li>{@code cnf} — an OPTIONAL confirmation claim (RFC 7800) reserved for future channel
  *       binding (e.g. an mTLS certificate thumbprint {@code x5t#S256}, or a peer uid for a Unix
  *       socket). mini-idp does not populate or enforce it yet; the placeholder is here so the

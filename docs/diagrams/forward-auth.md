@@ -34,7 +34,7 @@ sequenceDiagram
     else SCOPE route + scope satisfied (via mini-policy)
         GW-->>PX: 200 allow  (X-Auth-* set)
     else unauthenticated + browser
-        GW-->>PX: 302 → loginUrl?return=<original>
+        GW-->>PX: 302 → loginUrl?rd=<original>  (return param configurable via --return-param)
     else unauthenticated + API
         GW-->>PX: 401 + WWW-Authenticate: Bearer
     else forbidden (no rule / scope denied)

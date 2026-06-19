@@ -178,7 +178,7 @@ solved.
 `CaService` runs once at construction. It is the only writer of these files.
 
 ```
-first run (ca-key.json or ca-cert.json absent):
+first run (either ca-key.json or ca-cert.json absent; load only when both present):
     CaKeys.generate()                  -> fresh EC P-256 key pair
     CaKeys.selfSignedRoot(subject,…)   -> self-signed v3 root (CA:true, pathLen 0)
     caKeyStore.save(SigningKeys[ kid="ca", PKCS#8(privateKey) ])   <- wrapped under mini-kms if configured

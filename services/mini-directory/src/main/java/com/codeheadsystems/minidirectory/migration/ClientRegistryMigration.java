@@ -23,16 +23,18 @@ import tools.jackson.databind.ObjectMapper;
  * its id (so issued token subjects are unchanged), its Argon2id secret hash (so existing client
  * secrets keep working — the hash is imported verbatim and verified later under its own recorded
  * parameters), its enabled flag, and its authorization mapped to mini-directory grants: the
- * control-plane flag becomes {@code admin}, and each {@code groups[].operations[]} becomes a
- * {@code GrantSpec(action = operation, resource = keyGroup)} — the generalized form mini-policy and
- * mini-idp's reconstruction agree on.
+ * control-plane flag becomes {@code admin}, and each {@code grants[].operations[]} becomes a
+ * {@code GrantSpec(action = operation, resource = grants[].keyGroup)} — the generalized form
+ * mini-policy and mini-idp's reconstruction agree on.
  *
  * <p>Idempotent: an id already present in the directory is skipped (so a re-run after a partial
  * migration is safe). Reads {@code clients.json} as plain JSON — no dependency on mini-idp — and
  * never logs secret material (only ids and counts).
  *
  * <pre>
- *   mini-directory-migrate --clients-file ~/.mini-idp/clients.json --data-dir ~/.mini-directory
+ *   java -cp services/mini-directory/build/install/mini-directory/lib/'*' \
+ *     com.codeheadsystems.minidirectory.migration.ClientRegistryMigration \
+ *     --clients-file ~/.mini-idp/clients.json --data-dir ~/.mini-directory
  * </pre>
  */
 public final class ClientRegistryMigration {
@@ -107,7 +109,7 @@ public final class ClientRegistryMigration {
     }
   }
 
-  /** Map a mini-idp {@code Authorization} ({control + groups[].operations}) to flat GrantSpecs. */
+  /** Map a mini-idp {@code Authorization} ({control + grants[].operations}) to flat GrantSpecs. */
   private static List<GrantSpec> grantsOf(final JsonNode authorization) {
     final List<GrantSpec> grants = new ArrayList<>();
     if (authorization == null || authorization.get("grants") == null) {

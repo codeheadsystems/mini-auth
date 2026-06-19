@@ -16,7 +16,7 @@ import java.util.Set;
  *
  * <p>This is the on-the-wire mirror of {@link Authorization}: a {@code control} boolean (maps to
  * mini-kms {@code Principal.admin}) and a list of per-group operation grants (each maps to a
- * {@code KeyAuthorizationPolicy} entry). It is intentionally a separate type from the domain
+ * per-key-group {@code PolicyEngine} decision in mini-policy). It is intentionally a separate type from the domain
  * {@link Authorization}/{@link Grant} so the JSON contract is explicit and stable — the field
  * names here ARE the published contract the mini-kms team integrates against.
  *

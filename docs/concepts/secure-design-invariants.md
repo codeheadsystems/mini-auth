@@ -52,8 +52,13 @@ not by remembering to add a check:
 - mini-gateway denies any path no route rule matches, and **normalizes the path before matching** so
   `..` can't smuggle a request past a rule (lab 05).
 
+Deny-by-default is how the family enforces **least privilege** — every principal gets the minimum
+authority it needs and no more (narrow grants, scoped tokens, short TTLs, no blanket wildcards). The
+two-plane / two-token splits (mini-kms's data vs. control token) are the same principle: a leaked
+data credential can't do control operations.
+
 > **The reflex:** the *absence* of a rule must mean "no," never "yes." Make the default path the
-> refusing path.
+> refusing path, and grant the *least* that works — never standing authority "just in case."
 
 ## 4. Secrets via env/file, never argv — and never logged
 
@@ -102,6 +107,17 @@ crypto-shredding (mini-kms `DestroyVersion`) is the irreversible nuclear option.
 > **The reflex:** make credentials expire on their own; treat revocation as the exception, not the
 > plan.
 
+## 8. Anti-forgery on state-changing browser requests
+
+A browser carries the user's session cookie automatically, so any cross-site page can try to make the
+user's browser POST to a sensitive endpoint — a **[CSRF](../GLOSSARY.md#tokens-jose-oauth-20-openid-connect)**
+attack. mini-oidc defends every state-changing browser POST (login finish, consent decision, recovery)
+two ways: a **`SameSite=Lax`** session cookie (not sent on cross-site POSTs) **and** a
+per-pending-authorization **CSRF token** that must accompany the request, constant-time checked.
+
+> **The reflex:** if a *browser* can trigger a state change while carrying ambient credentials, it
+> needs an unguessable token the attacker's site can't supply.
+
 ---
 
 ## These compose
@@ -109,7 +125,9 @@ crypto-shredding (mini-kms `DestroyVersion`) is the irreversible nuclear option.
 The findings in the [security track](../security/README.md) are usually *one* of these reflexes being
 applied (or, in the "naive version," missing). The [PKCE-downgrade](../security/README.md) finding is
 #3 (don't accept the weak option — fail closed); [forward-auth header trust](../security/README.md) is
-#3 + a trust boundary; [keystore integrity](../security/README.md) is #5. Read a few findings with
+#3 + a trust boundary — the classic **[confused-deputy](../GLOSSARY.md#architecture--patterns)** risk,
+where a client forges `X-Auth-*` / `X-Forwarded-*` to make the gateway misuse its authority;
+[keystore integrity](../security/README.md) is #5. Read a few findings with
 this list beside you and the pattern-matching becomes automatic — which is the whole point.
 
 ## Now read it

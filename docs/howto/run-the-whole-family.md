@@ -49,9 +49,12 @@ Secrets come from **env or file, never argv**. The cross-service calls each need
 | `MINIKMS_PASSPHRASE` | mini-kms | (the keystore passphrase; no-TTY fallback) |
 
 > **The two most common mistakes**, both of which fail fast at startup with a clear message:
-> - Setting `--directory-url` on an issuer **without** its `*_DIRECTORY_TOKEN` →
->   *"a directory URL was set but no admin token."* Each issuer authenticates to the directory's admin
->   API, so it needs the directory's admin token.
+> - Setting `--directory-url` **without** the matching `*_DIRECTORY_TOKEN`. Each issuer authenticates
+>   to the directory's admin API, so it needs the directory's admin token. mini-oidc fails with
+>   *"a directory URL was set but no admin token"* (and treats `--directory-url` as **optional** —
+>   without it, it falls back to an empty in-memory directory). mini-idp instead **requires**
+>   `--directory-url` and reports *"no mini-directory token: set MINIIDP_DIRECTORY_TOKEN or provide
+>   --directory-token-file."*
 > - Forgetting that `MINIIDP_DIRECTORY_TOKEN` / `MINIOIDC_DIRECTORY_TOKEN` must be the **directory's**
 >   token, not the issuer's own.
 
@@ -113,7 +116,8 @@ See [lab 06](../tutorials/06-protect-the-signing-keys.md) for the wrap-on-save w
 ## Notes
 
 - **Loopback only.** Everything binds `127.0.0.1` by default. Exposing beyond loopback is an explicit
-  decision — and mini-oidc/mini-gateway must then sit behind a TLS proxy with `--secure-cookies`. See
+  decision — and the browser-facing services must then sit behind a TLS proxy, with mini-oidc started
+  using `--secure-cookies` (the flag is mini-oidc's; mini-gateway sets no cookies of its own). See
   [`configuration-and-secrets.md`](configuration-and-secrets.md).
 - **Who calls whom / failure modes** are catalogued in
   [`wire-the-services-together.md`](wire-the-services-together.md) (e.g. directory unreachable → every

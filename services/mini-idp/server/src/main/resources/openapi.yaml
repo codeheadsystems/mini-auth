@@ -338,7 +338,7 @@ components:
       type: object
       description: |
         The authorization payload. `control` maps to mini-kms `Principal.admin`; each `groups[]`
-        entry maps to a `KeyAuthorizationPolicy` decision for that key group.
+        entry maps to a per-key-group `PolicyEngine` decision (mini-policy) for that key group.
       properties:
         control:
           type: boolean

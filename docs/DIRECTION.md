@@ -62,10 +62,10 @@ Every mini, its one-line purpose, whether it is a library or a service, and its 
 | **mini-kms** | Envelope encryption / KMS: rotatable keys, the eventual vault that wraps other services' signing keys. | service (+ core/client libs) | **shipping** |
 | **mini-idp** | Machine-to-machine identity: OAuth2 client-credentials → Ed25519 JWT, JWKS. | service (+ core lib) | **shipping** |
 | **mini-token** | The shared token plane: JWS, JWKS, signing-key lifecycle, rotation, revocation, audit, the `grants` claim contract, a persistence SPI, the offline `JwsClaimsVerifier`, AND the shared browser-SSO `SessionService` (so mini-oidc and mini-gateway share one session store). | library | **shipping** |
-| **mini-policy** | Generalized authorization decision function: `(principal, action, resource) → allow/deny`. Generalizes mini-kms's `KeyAuthorizationPolicy`. | library | **shipping** (minimal engine; consumed by directory/oidc/gateway/kms — family-wide grant sourcing is future) |
+| **mini-policy** | Generalized authorization decision function: `(principal, action, resource) → allow/deny`. Generalizes mini-kms's per-key-group key-authorization policy into one engine. | library | **shipping** (minimal engine; consumed by directory/oidc/gateway/kms — family-wide grant sourcing is future) |
 | **mini-oidc** | Human SSO / OpenID Provider: authorization-code + PKCE, ID + access + refresh tokens, /userinfo, browser SSO sessions, single logout, login/consent UI. Embeds **pk-auth** (passkeys + backup-code recovery), mints via **mini-token**, authorizes scopes via **mini-policy**, resolves users from **mini-directory**. | service | **shipping** |
 | **mini-gateway** | Forward-auth endpoint for a reverse proxy (Traefik / Caddy / nginx `auth_request`) to gate apps with no native auth: validates the shared mini-oidc SSO session or a bearer token, decides per-route via mini-policy, returns allow / 401 / 403 / redirect-to-login. | service | **shipping** |
-| **mini-directory** | The single identity source of truth: humans, groups, roles, service accounts, and their grant mappings; resolves any account to a mini-policy `Principal` + expanded grants. | service | **shipping** (standalone; issuers not yet wired to read from it) |
+| **mini-directory** | The single identity source of truth: humans, groups, roles, service accounts, and their grant mappings; resolves any account to a mini-policy `Principal` + expanded grants. | service | **shipping** (mini-idp reads service accounts from it — required, no local registry; mini-oidc resolves humans from it when `--directory-url` is set) |
 | **pk-auth** | Passkeys-first auth library set, published on Maven Central under `com.codeheadsystems`. Consumed as a normal dependency — **not vendored**. | external library | **shipping (external)** |
 | **mini-ca** | Small internal certificate authority for mTLS between the minis and workload identity in the homelab. Issues/renews short-lived leaves from CSRs; its CA key is wrapped under mini-kms. | service (application) | **shipping** |
 | **mini-console** | Optional unified admin UI over the family. | service (future) | **roadmap** (placeholder module) |
@@ -150,8 +150,8 @@ the load-bearing relationships:
   mini-idp wrote first, so the two issuers stop diverging.
 - **All services evaluate through mini-policy.** mini-gateway gating a route, mini-kms gating a
   key group, the issuers checking a scope — each becomes a `PolicyRequest(principal, resource,
-  action)` against one engine. mini-policy is the generalization of mini-kms's
-  `KeyAuthorizationPolicy`.
+  action)` against one engine. mini-policy generalizes mini-kms's former per-key-group
+  key-authorization policy into the shared `PolicyEngine`.
 - **mini-token's signing keys are wrapped by mini-kms (the recursive integration — *done*).** The
   default educational path still stores the Ed25519 private key locally (`0600`), but with the
   `--kms-*` config the auth services wrap each signing key under a mini-kms key group: only the
@@ -166,7 +166,7 @@ the load-bearing relationships:
 
 The claim payload already lines up across the family. A mini-idp token's `grants` claim maps
 directly onto mini-kms's authorization model (`sub → Principal.id`, `grants.control →
-Principal.admin`, `grants.groups[] → KeyAuthorizationPolicy`). mini-token preserves that mapping;
+Principal.admin`, `grants.groups[]` → a per-key-group `PolicyEngine` decision (mini-policy)). mini-token preserves that mapping;
 mini-policy is where it is evaluated; mini-directory is where the grants originate.
 
 > **Wired vs. designed — read this before tracing the token → mini-kms path.** The mapping above is
@@ -343,7 +343,7 @@ extraction only promoted `Base64Url`/`RandomIds`, which it directly needed; the 
 clear second consumer to pin them against.
 
 **Phase 2 — Generalize authorization.** Flesh out **mini-policy** into a real engine and adopt it
-behind mini-kms's `KeyAuthorizationPolicy` seam first (it already has the right shape), then behind
+behind mini-kms's per-key-group `PolicyEngine` seam first (it already has the right shape), then behind
 the issuers' scope checks.
 
 **Phase 3 — Stand up the directory.** *Standalone service: done.* **mini-directory** now has a real
@@ -351,10 +351,12 @@ identity model (humans, groups, roles, service accounts), an admin CRUD API behi
 bootstrap admin token, atomic-`0600` persistence, an OpenAPI spec + vendored Swagger UI, and the
 defining capability: resolving any account into a mini-policy `Principal` plus its fully-expanded,
 de-duplicated grants (roles expand to grants; group memberships are inherited). Service-account
-secrets are Argon2id-hashed at rest. What remains is **wiring the issuers to read from it** — mini-idp
-resolving service accounts, mini-oidc resolving humans — and the open question below about folding
-mini-idp's client registry in. That integration is deliberately not done yet; the service stands
-alone today.
+secrets are Argon2id-hashed at rest. **The issuers now read from it.** mini-idp resolves service
+accounts here at every `/oauth/token` (via `HttpServiceAccountDirectory` → the directory's
+`/admin/service-accounts/authenticate`) and `--directory-url` is **required** — mini-idp no longer
+keeps a local client registry, which resolved the open question about folding it in. mini-oidc
+resolves humans here too, via its `UserDirectory` SPI, when `--directory-url` is set. What remains is
+the token → mini-kms *authorization* seam (below) — not the directory wiring, which is done.
 
 **Phase 4 — Human SSO.** *Done.* **mini-oidc** ships: the authorization-code + PKCE flow, ID +
 access tokens minted via mini-token (offline-verifiable against the shared JWKS) + rotating refresh

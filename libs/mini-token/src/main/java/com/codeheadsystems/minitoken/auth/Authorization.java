@@ -12,7 +12,7 @@ import java.util.List;
  *       This maps directly onto mini-kms's {@code Principal.admin} flag: a verified token with
  *       {@code controlPlane = true} becomes an admin principal there.</li>
  *   <li>{@code grants} — the per-key-group data-plane {@link KeyOperation}s the client may
- *       perform. mini-kms feeds these to its {@code KeyAuthorizationPolicy}.</li>
+ *       perform. mini-kms feeds these to a per-key-group {@code PolicyEngine} decision (mini-policy).</li>
  * </ul>
  *
  * <p>The clientId is NOT stored here; it is the token subject ({@code sub}) and becomes the
