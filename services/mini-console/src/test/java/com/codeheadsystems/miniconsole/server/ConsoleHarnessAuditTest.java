@@ -80,7 +80,8 @@ class ConsoleHarnessAuditTest {
   @Test
   void harness_whenNotConfigured_saysSo(@TempDir final Path dir) throws Exception {
     startWith(dir, null);
-    assertTrue(get("/harness", session()).body().contains("No mini-idp is configured"));
+    // With neither mini-idp nor mini-ca wired, the harness reports no configured backends.
+    assertTrue(get("/harness", session()).body().contains("No services are configured for the harness"));
   }
 
   @Test

@@ -28,8 +28,17 @@ dependencies {
     // dep on mini-kms:core is `implementation`, so we declare core directly for the KeyGroupView DTO.
     implementation(project(":services:mini-kms:client"))
     implementation(project(":services:mini-kms:core"))
+    // Slice 5: the mini-ca client (issue/renew/revoke/log + the Csr generator) for the Certificates
+    // page and the certificate-lifecycle exercise. Brings mini-client-common transitively. CSR
+    // generation lives in the client lib, so the console's chain validation stays pure-JDK (no
+    // BouncyCastle dependency here).
+    implementation(project(":libs:mini-ca-client"))
     // JSON for the session store document (Sessions) and the /health body.
     implementation(libs.jackson.databind)
+
+    // The certificate-lifecycle exercise test boots a REAL mini-ca (plaintext-key mode) and proves the
+    // flow issues a leaf that genuinely chains to the CA root.
+    testImplementation(project(":services:mini-ca"))
     // JUnit 5 (jupiter + launcher) is supplied by the convention plugin.
 }
 

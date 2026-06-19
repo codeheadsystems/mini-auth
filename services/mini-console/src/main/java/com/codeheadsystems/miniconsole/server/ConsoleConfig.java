@@ -25,6 +25,8 @@ import java.util.Map;
  *   --kms-tcp HOST:PORT       MINICONSOLE_KMS_TCP             mini-kms loopback endpoint to wire (optional)
  *   --kms-api-token-file P    MINICONSOLE_KMS_API_TOKEN_FILE  file holding the KMS data-plane token (alt: MINICONSOLE_KMS_API_TOKEN env)
  *   --kms-admin-token-file P  MINICONSOLE_KMS_ADMIN_TOKEN_FILE file holding the KMS control-plane token (alt: MINICONSOLE_KMS_ADMIN_TOKEN env)
+ *   --ca-url URL              MINICONSOLE_CA_URL              mini-ca origin to wire (optional)
+ *   --ca-token-file PATH      MINICONSOLE_CA_TOKEN_FILE       file holding the ca admin token (alt: MINICONSOLE_CA_TOKEN env)
  * </pre>
  *
  * <p><b>Downstream tokens are console-scoped.</b> The console holds a copy of each downstream
@@ -57,12 +59,14 @@ public final class ConsoleConfig {
   private final int kmsPort;
   private final Path kmsApiTokenFilePath;
   private final Path kmsAdminTokenFilePath;
+  private final URI caUrl;
+  private final Path caTokenFilePath;
 
   ConsoleConfig(final String host, final int port, final Path dataDir, final Path adminTokenFilePath,
                 final boolean secureCookies, final Duration sessionTtl, final URI directoryUrl,
                 final Path directoryTokenFilePath, final URI idpUrl, final Path idpTokenFilePath,
                 final String kmsHost, final int kmsPort, final Path kmsApiTokenFilePath,
-                final Path kmsAdminTokenFilePath) {
+                final Path kmsAdminTokenFilePath, final URI caUrl, final Path caTokenFilePath) {
     this.host = host;
     this.port = port;
     this.dataDir = dataDir;
@@ -77,6 +81,8 @@ public final class ConsoleConfig {
     this.kmsPort = kmsPort;
     this.kmsApiTokenFilePath = kmsApiTokenFilePath;
     this.kmsAdminTokenFilePath = kmsAdminTokenFilePath;
+    this.caUrl = caUrl;
+    this.caTokenFilePath = caTokenFilePath;
   }
 
   /** Resolve configuration from CLI args and the environment. */
@@ -94,6 +100,8 @@ public final class ConsoleConfig {
     String kmsTcp = env.get("MINICONSOLE_KMS_TCP");
     String kmsApiTokenFile = env.get("MINICONSOLE_KMS_API_TOKEN_FILE");
     String kmsAdminTokenFile = env.get("MINICONSOLE_KMS_ADMIN_TOKEN_FILE");
+    String caUrl = env.get("MINICONSOLE_CA_URL");
+    String caTokenFile = env.get("MINICONSOLE_CA_TOKEN_FILE");
 
     for (int i = 0; i < args.length; i++) {
       final String arg = args[i];
@@ -111,6 +119,8 @@ public final class ConsoleConfig {
         case "--kms-tcp" -> kmsTcp = requireValue(args, ++i, arg);
         case "--kms-api-token-file" -> kmsApiTokenFile = requireValue(args, ++i, arg);
         case "--kms-admin-token-file" -> kmsAdminTokenFile = requireValue(args, ++i, arg);
+        case "--ca-url" -> caUrl = requireValue(args, ++i, arg);
+        case "--ca-token-file" -> caTokenFile = requireValue(args, ++i, arg);
         default -> throw new IllegalArgumentException("unknown argument: " + arg);
       }
     }
@@ -134,7 +144,9 @@ public final class ConsoleConfig {
         idpTokenFile != null ? Paths.get(idpTokenFile) : null,
         kms == null ? null : kms[0], kms == null ? 0 : Integer.parseInt(kms[1]),
         kmsApiTokenFile != null ? Paths.get(kmsApiTokenFile) : null,
-        kmsAdminTokenFile != null ? Paths.get(kmsAdminTokenFile) : null);
+        kmsAdminTokenFile != null ? Paths.get(kmsAdminTokenFile) : null,
+        caUrl != null && !caUrl.isBlank() ? URI.create(caUrl.trim()) : null,
+        caTokenFile != null ? Paths.get(caTokenFile) : null);
   }
 
   /** @return {host, port} parsed from a {@code HOST:PORT} value, or null when not set. */
@@ -227,6 +239,16 @@ public final class ConsoleConfig {
   /** @return the file the KMS control-plane admin token may be read from, or null (then env). */
   public Path kmsAdminTokenFilePath() {
     return kmsAdminTokenFilePath;
+  }
+
+  /** @return the mini-ca origin to wire, or null if mini-ca is not configured. */
+  public URI caUrl() {
+    return caUrl;
+  }
+
+  /** @return the file the ca admin token may be read from, or null (then the env var). */
+  public Path caTokenFilePath() {
+    return caTokenFilePath;
   }
 
   private static int positiveOr(final Integer value, final int fallback) {

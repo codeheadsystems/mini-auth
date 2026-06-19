@@ -1,10 +1,12 @@
 package com.codeheadsystems.miniconsole.server;
 
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
+import com.codeheadsystems.miniconsole.harness.flows.CertLifecycleFlow;
 import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 import com.codeheadsystems.miniconsole.harness.flows.M2mTokenFlow;
 import com.codeheadsystems.miniconsole.kms.KeyGroupAdmin;
 import com.codeheadsystems.miniconsole.server.http.Router;
+import com.codeheadsystems.minica.client.MiniCaClient;
 import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
 import com.codeheadsystems.miniidp.client.MiniIdpClient;
 import com.sun.net.httpserver.HttpServer;
@@ -104,16 +106,40 @@ public final class ConsoleServer {
   public static ConsoleServer create(final ConsoleConfig config, final String consoleToken,
                                      final MiniDirectoryClient directory, final MiniIdpClient idp,
                                      final KeyGroupAdmin keys, final Clock clock) throws IOException {
+    return create(config, consoleToken, directory, idp, keys, null, clock);
+  }
+
+  /**
+   * Build a server, optionally wiring the mini-directory, mini-idp, mini-kms, and mini-ca clients.
+   *
+   * @param config       the resolved configuration.
+   * @param consoleToken the bootstrap console token guarding login (resolved from env/file).
+   * @param directory    the wired directory client, or null when the directory is not configured.
+   * @param idp          the wired idp client, or null when mini-idp is not configured.
+   * @param keys         the wired KMS key-group admin, or null when mini-kms is not configured.
+   * @param ca           the wired mini-ca client, or null when mini-ca is not configured. (Tests
+   *                     inject a fake here to exercise the Certificates page without a real CA.)
+   * @param clock        the clock shared by the session store and the exercise harness.
+   * @return a built, not-yet-started server.
+   * @throws IOException if the listening socket cannot be opened.
+   */
+  public static ConsoleServer create(final ConsoleConfig config, final String consoleToken,
+                                     final MiniDirectoryClient directory, final MiniIdpClient idp,
+                                     final KeyGroupAdmin keys, final MiniCaClient ca, final Clock clock)
+      throws IOException {
     final ConsoleSession session = new ConsoleSession(config.dataDir(), clock, config.sessionTtl());
-    // The exercise harness: the m2m token flow (Slice 3) and the signing-key rotation flow (Slice 4),
-    // both driven by the wired idp client.
+    // The exercise harness: the m2m token flow (Slice 3), the signing-key rotation flow (Slice 4),
+    // and the certificate-lifecycle flow (Slice 5). The first two are driven by the wired idp client,
+    // the third by the wired ca client.
     final M2mTokenFlow m2mFlow = new M2mTokenFlow(clock);
     final KeyRotationFlow keyRotationFlow = new KeyRotationFlow(clock);
-    final ExerciseRegistry exercises = new ExerciseRegistry(List.of(m2mFlow, keyRotationFlow));
+    final CertLifecycleFlow certLifecycleFlow = new CertLifecycleFlow();
+    final ExerciseRegistry exercises =
+        new ExerciseRegistry(List.of(m2mFlow, keyRotationFlow, certLifecycleFlow));
     final ConsoleHandlers handlers = new ConsoleHandlers(
         session, new AdminAuthenticator(consoleToken), new Cookies(config.secureCookies()),
-        new Csrf(), config.sessionTtl().toSeconds(), directory, idp, keys, exercises, m2mFlow,
-        keyRotationFlow);
+        new Csrf(), config.sessionTtl().toSeconds(), directory, idp, keys, ca, exercises, m2mFlow,
+        keyRotationFlow, certLifecycleFlow);
     final Router router = handlers.router();
 
     final HttpServer http = HttpServer.create(new InetSocketAddress(config.host(), config.port()), 0);

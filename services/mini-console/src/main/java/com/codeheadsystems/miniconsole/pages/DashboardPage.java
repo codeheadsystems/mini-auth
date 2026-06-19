@@ -18,9 +18,9 @@ public final class DashboardPage {
   }
 
   // The services still awaiting a client + page (see the roadmap in docs/design/mini-console.md).
-  // mini-directory (Slice 1), mini-idp (Slice 3), and mini-kms (Slice 4) are rendered live below.
+  // mini-directory (Slice 1), mini-idp (Slice 3), mini-kms (Slice 4), and mini-ca (Slice 5) are
+  // rendered live below.
   private static final List<Pending> PENDING = List.of(
-      new Pending("mini-ca", 5),
       new Pending("mini-oidc", 6),
       new Pending("mini-gateway", 7));
 
@@ -36,12 +36,15 @@ public final class DashboardPage {
    * @param idpStatus           the mini-idp status line (already non-secret, escaped here).
    * @param kmsConfigured       whether a mini-kms client is wired (links the row when true).
    * @param kmsStatus           the mini-kms status line (already non-secret, escaped here).
+   * @param caConfigured        whether a mini-ca client is wired (links the row when true).
+   * @param caStatus            the mini-ca status line (already non-secret, escaped here).
    * @return a complete HTML document.
    */
   public static String render(final String boundAddress, final String csrf,
                               final boolean directoryConfigured, final String directoryStatus,
                               final boolean idpConfigured, final String idpStatus,
-                              final boolean kmsConfigured, final String kmsStatus) {
+                              final boolean kmsConfigured, final String kmsStatus,
+                              final boolean caConfigured, final String caStatus) {
     final StringBuilder rows = new StringBuilder();
 
     // mini-directory: live as of Slice 1.
@@ -60,6 +63,11 @@ public final class DashboardPage {
     final String kmsName = kmsConfigured ? "<a href=\"/keys\">mini-kms</a>" : "mini-kms";
     rows.append("<tr><td>").append(kmsName).append("</td><td>")
         .append(Layout.escape(kmsStatus)).append("</td></tr>");
+
+    // mini-ca: live as of Slice 5 (links to the Certificates page).
+    final String caName = caConfigured ? "<a href=\"/certificates\">mini-ca</a>" : "mini-ca";
+    rows.append("<tr><td>").append(caName).append("</td><td>")
+        .append(Layout.escape(caStatus)).append("</td></tr>");
 
     // The remaining services: honest placeholders.
     for (final Pending service : PENDING) {

@@ -3,11 +3,13 @@ package com.codeheadsystems.miniconsole.server;
 import com.codeheadsystems.miniclient.common.ClientException;
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
 import com.codeheadsystems.miniconsole.harness.ExerciseResult;
+import com.codeheadsystems.miniconsole.harness.flows.CertLifecycleFlow;
 import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 import com.codeheadsystems.miniconsole.harness.flows.M2mTokenFlow;
 import com.codeheadsystems.miniconsole.kms.KeyAdminException;
 import com.codeheadsystems.miniconsole.kms.KeyGroupAdmin;
 import com.codeheadsystems.miniconsole.pages.AuditPages;
+import com.codeheadsystems.miniconsole.pages.CertificatesPages;
 import com.codeheadsystems.miniconsole.pages.DashboardPage;
 import com.codeheadsystems.miniconsole.pages.HarnessPages;
 import com.codeheadsystems.miniconsole.pages.IdentitiesPages;
@@ -17,6 +19,8 @@ import com.codeheadsystems.miniconsole.server.http.ApiException;
 import com.codeheadsystems.miniconsole.server.http.HttpResponse;
 import com.codeheadsystems.miniconsole.server.http.RequestContext;
 import com.codeheadsystems.miniconsole.server.http.Router;
+import com.codeheadsystems.minica.client.MiniCaClient;
+import com.codeheadsystems.minica.client.model.Certificate;
 import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
 import com.codeheadsystems.minidirectory.client.model.Assignment;
 import com.codeheadsystems.minidirectory.client.model.GrantSpec;
@@ -30,6 +34,7 @@ import com.codeheadsystems.minikms.protocol.KeyGroupView;
 import com.codeheadsystems.minitoken.jwks.Jwk;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -66,9 +71,11 @@ public final class ConsoleHandlers {
   private final MiniDirectoryClient directory;
   private final MiniIdpClient idp;
   private final KeyGroupAdmin keys;
+  private final MiniCaClient ca;
   private final ExerciseRegistry exercises;
   private final M2mTokenFlow m2mFlow;
   private final KeyRotationFlow keyRotationFlow;
+  private final CertLifecycleFlow certLifecycleFlow;
 
   /**
    * @param session           the console-login session store.
@@ -79,15 +86,19 @@ public final class ConsoleHandlers {
    * @param directory         the mini-directory client, or null when the directory is not configured.
    * @param idp               the mini-idp client, or null when mini-idp is not configured.
    * @param keys              the KMS key-group admin port, or null when mini-kms is not configured.
+   * @param ca                the mini-ca client, or null when mini-ca is not configured.
    * @param exercises         the exercise registry (for the Harness page listing).
    * @param m2mFlow           the machine-to-machine token flow (dispatched by its run route).
    * @param keyRotationFlow   the signing-key rotation flow (dispatched by its run route).
+   * @param certLifecycleFlow the certificate-lifecycle flow (dispatched by its run route).
    */
   public ConsoleHandlers(final ConsoleSession session, final AdminAuthenticator auth,
                          final Cookies cookies, final Csrf csrf, final long sessionTtlSeconds,
                          final MiniDirectoryClient directory, final MiniIdpClient idp,
-                         final KeyGroupAdmin keys, final ExerciseRegistry exercises,
-                         final M2mTokenFlow m2mFlow, final KeyRotationFlow keyRotationFlow) {
+                         final KeyGroupAdmin keys, final MiniCaClient ca,
+                         final ExerciseRegistry exercises, final M2mTokenFlow m2mFlow,
+                         final KeyRotationFlow keyRotationFlow,
+                         final CertLifecycleFlow certLifecycleFlow) {
     this.session = session;
     this.auth = auth;
     this.cookies = cookies;
@@ -96,9 +107,11 @@ public final class ConsoleHandlers {
     this.directory = directory;
     this.idp = idp;
     this.keys = keys;
+    this.ca = ca;
     this.exercises = exercises;
     this.m2mFlow = m2mFlow;
     this.keyRotationFlow = keyRotationFlow;
+    this.certLifecycleFlow = certLifecycleFlow;
   }
 
   /** @return the router with the console routes registered. */
@@ -127,6 +140,13 @@ public final class ConsoleHandlers {
         .route("GET", "/harness", this::harness)
         .route("POST", "/harness/m2m-token/run", this::runM2mToken)
         .route("POST", "/harness/key-rotation/run", this::runKeyRotation)
+        .route("POST", "/harness/cert-lifecycle/run", this::runCertLifecycle)
+        // mini-ca certificates (Slice 5): issuance log + revocation list, issue/renew/revoke.
+        .route("GET", "/certificates", this::certificates)
+        .route("POST", "/certificates/issue", this::issueCert)
+        .route("POST", "/certificates/renew", this::renewCert)
+        .route("GET", "/certificates/revoke/confirm", this::revokeCertConfirm)
+        .route("POST", "/certificates/revoke", this::revokeCert)
         // mini-kms key groups + idp signing-key rotation (Slice 4).
         .route("GET", "/keys", this::keysPage)
         .route("POST", "/keys/kms", this::createKeyGroup)
@@ -182,7 +202,7 @@ public final class ConsoleHandlers {
     final String host = context.header("Host");
     final String address = host != null ? host : "loopback";
     return htmlWithCsrf(DashboardPage.render(address, token, directory != null, directoryStatus(),
-        idp != null, idpStatus(), keys != null, keysStatus()), token);
+        idp != null, idpStatus(), keys != null, keysStatus(), ca != null, caStatus()), token);
   }
 
   /** @return the live mini-directory status line for the Dashboard row (no secret, no oracle). */
@@ -216,6 +236,18 @@ public final class ConsoleHandlers {
       return "not configured (set --kms-tcp)";
     }
     return keys.healthy() ? "healthy" : "unreachable";
+  }
+
+  /** @return the live mini-ca status line for the Dashboard row (no secret, no oracle). */
+  private String caStatus() {
+    if (ca == null) {
+      return "not configured (set --ca-url)";
+    }
+    try {
+      return "healthy (" + ca.health().status() + ")";
+    } catch (final ClientException e) {
+      return "unreachable";
+    }
   }
 
   /** The Identities list (read-only): principals, groups, and roles from mini-directory. */
@@ -381,17 +413,17 @@ public final class ConsoleHandlers {
     }
   }
 
-  /** The Harness page: list the available exercises (and the m2m run form). */
+  /** The Harness page: list the available exercises, gating each by whether its backend is wired. */
   private HttpResponse harness(final RequestContext context) {
     final HttpResponse redirect = requireSession(context);
     if (redirect != null) {
       return redirect;
     }
     final String token = csrf.mint();
-    if (idp == null) {
+    if (idp == null && ca == null) {
       return htmlWithCsrf(HarnessPages.notConfigured(token), token);
     }
-    return htmlWithCsrf(HarnessPages.list(exercises, token), token);
+    return htmlWithCsrf(HarnessPages.list(exercises, idp != null, ca != null, token), token);
   }
 
   /** Run the machine-to-machine token flow with the operator-supplied client id + secret. */
@@ -405,6 +437,27 @@ public final class ConsoleHandlers {
    */
   private HttpResponse runKeyRotation(final RequestContext context) {
     return runExercise(context, (clientId, secret) -> keyRotationFlow.run(idp, clientId, secret));
+  }
+
+  /**
+   * Run the certificate-lifecycle flow. Unlike the idp flows it needs no operator credentials (it
+   * generates its own CSR and uses the held CA admin token); it requires a session and a valid CSRF
+   * token, and warns (on the Harness page) that it issues and revokes real certificates.
+   */
+  private HttpResponse runCertLifecycle(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (!csrf.verify(context.cookie(Cookies.CSRF), context.formParams().get("csrf"))) {
+      throw ApiException.badRequest("invalid or missing CSRF token");
+    }
+    if (ca == null) {
+      return htmlWithCsrf(HarnessPages.notConfigured(token), token);
+    }
+    final ExerciseResult result = certLifecycleFlow.run(ca);
+    return htmlWithCsrf(HarnessPages.result(result, token), token);
   }
 
   /**
@@ -593,6 +646,106 @@ public final class ConsoleHandlers {
       throw ApiException.badRequest("missing " + name);
     }
     return value.trim();
+  }
+
+  // ---- mini-ca certificates (Slice 5) --------------------------------------------------------
+
+  /** The Certificates page: the CA root, the issuance log, and the revocation list (read-only). */
+  private HttpResponse certificates(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (ca == null) {
+      return htmlWithCsrf(CertificatesPages.notConfigured(token), token);
+    }
+    try {
+      return htmlWithCsrf(CertificatesPages.overview(ca.caCertificatePem(), ca.issuanceLog(),
+          ca.revocations(), token), token);
+    } catch (final ClientException e) {
+      // A refused admin token and an unreachable CA look the same — no oracle.
+      return htmlWithCsrf(CertificatesPages.unavailable(token), token);
+    }
+  }
+
+  /** Issue a leaf from a pasted CSR (CSRF-guarded); render the issued certificate directly. */
+  private HttpResponse issueCert(final RequestContext context) {
+    return certMutate(context, form -> {
+      final Certificate cert = ca.issue(requireField(form, "csr"), ttl(form.get("ttlSeconds")));
+      return page(t -> CertificatesPages.issued(cert, t));
+    });
+  }
+
+  /** Renew a leaf from a pasted CSR, optionally revoking a previous serial (CSRF-guarded). */
+  private HttpResponse renewCert(final RequestContext context) {
+    return certMutate(context, form -> {
+      final Certificate cert = ca.renew(requireField(form, "csr"), ttl(form.get("ttlSeconds")),
+          blankToNull(form.get("previousSerial")));
+      return page(t -> CertificatesPages.issued(cert, t));
+    });
+  }
+
+  /** Confirm-step page for revoking a certificate (GET, no mutation). Serial/reason are public. */
+  private HttpResponse revokeCertConfirm(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String serial = context.queryParam("serial");
+    if (serial == null || serial.isBlank()) {
+      throw ApiException.badRequest("serial is required");
+    }
+    final String token = csrf.mint();
+    return htmlWithCsrf(
+        CertificatesPages.confirmRevoke(serial, context.queryParam("reason"), token), token);
+  }
+
+  /** Revoke a certificate (CSRF-guarded, reached via the confirm page); redirect to /certificates. */
+  private HttpResponse revokeCert(final RequestContext context) {
+    return certMutate(context, form -> {
+      ca.revoke(requireField(form, "serial"), blankToNull(form.get("reason")));
+      return HttpResponse.redirect("/certificates");
+    });
+  }
+
+  /**
+   * The shared guard for every mini-ca mutation: require a session, verify CSRF before any side
+   * effect, short-circuit if no CA is configured, run the action, and collapse any
+   * {@link ClientException} to a generic page (no oracle — a malformed CSR, a refused admin token, and
+   * an unreachable CA look alike; the CA itself returns one generic 400 for any bad CSR).
+   */
+  private HttpResponse certMutate(final RequestContext context,
+                                  final Function<Map<String, String>, HttpResponse> action) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final Map<String, String> form = context.formParams();
+    if (!csrf.verify(context.cookie(Cookies.CSRF), form.get("csrf"))) {
+      throw ApiException.badRequest("invalid or missing CSRF token");
+    }
+    if (ca == null) {
+      return page(CertificatesPages::notConfigured);
+    }
+    try {
+      return action.apply(form);
+    } catch (final ClientException e) {
+      return page(CertificatesPages::unavailable);
+    }
+  }
+
+  /** Parse an optional {@code ttlSeconds} form field into a {@link Duration}, or null (CA default). */
+  private static Duration ttl(final String seconds) {
+    if (seconds == null || seconds.isBlank()) {
+      return null;
+    }
+    try {
+      final long value = Long.parseLong(seconds.trim());
+      return value > 0 ? Duration.ofSeconds(value) : null;
+    } catch (final NumberFormatException e) {
+      throw ApiException.badRequest("invalid ttlSeconds");
+    }
   }
 
   /**

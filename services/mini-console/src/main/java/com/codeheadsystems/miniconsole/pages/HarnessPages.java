@@ -3,6 +3,7 @@ package com.codeheadsystems.miniconsole.pages;
 import com.codeheadsystems.miniconsole.harness.Exercise;
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
 import com.codeheadsystems.miniconsole.harness.ExerciseResult;
+import com.codeheadsystems.miniconsole.harness.flows.CertLifecycleFlow;
 import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 
 /**
@@ -21,15 +22,19 @@ public final class HarnessPages {
   }
 
   /**
-   * The Harness landing page: each registered exercise with its description and a run form taking a
-   * client id + secret. The signing-key rotation flow additionally carries a warning that it mutates
-   * mini-idp state.
+   * The Harness landing page: each registered exercise with its description and a run form. The idp
+   * flows (m2m token, key rotation) take a client id + secret; the certificate-lifecycle flow needs no
+   * input (it generates its own CSR). Each exercise's form is shown only when its backend is wired,
+   * else a note pointing at the flag that wires it. The mutating flows carry an explicit warning.
    *
-   * @param registry the registered exercises.
-   * @param csrf     the CSRF token for the run form(s) and the nav (escaped here).
+   * @param registry     the registered exercises.
+   * @param idpAvailable whether a mini-idp client is wired (gates the idp flows).
+   * @param caAvailable  whether a mini-ca client is wired (gates the certificate flow).
+   * @param csrf         the CSRF token for the run form(s) and the nav (escaped here).
    * @return a complete HTML document.
    */
-  public static String list(final ExerciseRegistry registry, final String csrf) {
+  public static String list(final ExerciseRegistry registry, final boolean idpAvailable,
+                            final boolean caAvailable, final String csrf) {
     final StringBuilder body = new StringBuilder();
     body.append("<p class=\"muted\">Run an end-to-end flow against the wired services and verify the "
         + "result. Credentials you enter are used for the single run and never stored.</p>");
@@ -37,10 +42,17 @@ public final class HarnessPages {
       body.append("<section style=\"margin-top:1.5rem\"><h2 style=\"font-size:1.1rem\">")
           .append(Layout.escape(exercise.title())).append("</h2><p class=\"muted\">")
           .append(Layout.escape(exercise.description())).append("</p>");
+      final boolean isCert = CertLifecycleFlow.ID.equals(exercise.id());
       if (KeyRotationFlow.ID.equals(exercise.id())) {
         body.append("<p class=\"warn\">This exercise rotates a real mini-idp signing key.</p>");
+      } else if (isCert) {
+        body.append("<p class=\"warn\">This exercise issues and revokes real certificates.</p>");
       }
-      body.append(runForm(exercise.id(), csrf));
+      if (isCert) {
+        body.append(caAvailable ? noInputRunForm(exercise.id(), csrf) : requires("--ca-url"));
+      } else {
+        body.append(idpAvailable ? runForm(exercise.id(), csrf) : requires("--idp-url"));
+      }
       body.append("</section>");
     }
     return Layout.page("Harness", Layout.authenticatedNav(csrf), body.toString());
@@ -73,14 +85,15 @@ public final class HarnessPages {
     return Layout.page("Harness result", Layout.authenticatedNav(csrf), body.toString());
   }
 
-  /** The page shown when no mini-idp is configured (the m2m flow has nothing to call). */
+  /** The page shown when no harness backend (mini-idp or mini-ca) is configured. */
   public static String notConfigured(final String csrf) {
-    final String body = "<p class=\"muted\">No mini-idp is configured, so the machine-to-machine "
-        + "token exercise cannot run. Set <code>--idp-url</code> (and an IDP token) to enable it.</p>";
+    final String body = "<p class=\"muted\">No services are configured for the harness. Set "
+        + "<code>--idp-url</code> (for the token flows) and/or <code>--ca-url</code> (for the "
+        + "certificate flow) to enable exercises.</p>";
     return Layout.page("Harness", Layout.authenticatedNav(csrf), body);
   }
 
-  /** A run form for one exercise: a client id and a (password) secret, plus the CSRF token. */
+  /** A run form for an idp exercise: a client id and a (password) secret, plus the CSRF token. */
   private static String runForm(final String exerciseId, final String csrf) {
     return """
         <form method="post" action="/harness/$ID/run" style="margin-top:.5rem">
@@ -90,5 +103,20 @@ public final class HarnessPages {
           <button type="submit">Run</button>
         </form>
         """.replace("$ID", Layout.escape(exerciseId)).replace("$CSRF", Layout.escape(csrf));
+  }
+
+  /** A run form for an exercise that needs no operator input (the certificate flow). */
+  private static String noInputRunForm(final String exerciseId, final String csrf) {
+    return """
+        <form method="post" action="/harness/$ID/run" style="margin-top:.5rem">
+          <input type="hidden" name="csrf" value="$CSRF">
+          <button type="submit">Run</button>
+        </form>
+        """.replace("$ID", Layout.escape(exerciseId)).replace("$CSRF", Layout.escape(csrf));
+  }
+
+  /** A note shown in place of a run form when the exercise's backend is not wired. */
+  private static String requires(final String flag) {
+    return "<p class=\"muted\">Requires <code>" + Layout.escape(flag) + "</code>.</p>";
   }
 }

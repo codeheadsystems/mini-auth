@@ -73,6 +73,18 @@ public final class HttpTransport {
   }
 
   /**
+   * GET a path whose body is plain text rather than JSON, returning it as a UTF-8 string. This is for
+   * the one endpoint in the family that does not speak JSON — mini-ca's {@code GET /ca}, which serves
+   * a PEM certificate. The same no-oracle collapse applies: any non-2xx or transport failure surfaces
+   * as one generic {@link ClientException} with no status or body leaked.
+   *
+   * @throws ClientException on any failure (no status/body detail leaked).
+   */
+  public String getText(final String path) {
+    return new String(exchange("GET", path, null, "application/json"), StandardCharsets.UTF_8);
+  }
+
+  /**
    * POST a JSON {@code body} and deserialize the response into {@code type}.
    *
    * @throws ClientException on any failure (no status/body detail leaked).

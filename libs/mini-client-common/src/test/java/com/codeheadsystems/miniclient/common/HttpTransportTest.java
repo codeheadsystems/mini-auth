@@ -64,6 +64,16 @@ class HttpTransportTest {
       respond(exchange, 200, "{\"id\":\"t\",\"size\":1}");
     });
     server.createContext("/formboom", exchange -> respond(exchange, 401, "{\"error\":\"secret detail\"}"));
+    server.createContext("/pem", exchange -> {
+      final byte[] bytes = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+          .getBytes(StandardCharsets.UTF_8);
+      exchange.getResponseHeaders().add("Content-Type", "application/x-pem-file");
+      exchange.sendResponseHeaders(200, bytes.length);
+      try (OutputStream out = exchange.getResponseBody()) {
+        out.write(bytes);
+      }
+    });
+    server.createContext("/pemboom", exchange -> respond(exchange, 500, "secret detail"));
     server.start();
     final URI base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
     transport = new HttpTransport(base, "test-token");
@@ -160,6 +170,20 @@ class HttpTransportTest {
   void postForm_non2xx_collapsesToClientException_withNoOracle() {
     final ClientException thrown = assertThrows(ClientException.class,
         () -> transport.postForm("/formboom", java.util.Map.of("k", "v"), Widget.class));
+    assertTrue(thrown.getMessage() != null && !thrown.getMessage().contains("secret"));
+  }
+
+  @Test
+  void getText_returnsTheRawNonJsonBody() {
+    final String pem = transport.getText("/pem");
+    assertTrue(pem.startsWith("-----BEGIN CERTIFICATE-----"));
+    assertTrue(pem.contains("END CERTIFICATE"));
+  }
+
+  @Test
+  void getText_non2xx_collapsesToClientException_withNoOracle() {
+    final ClientException thrown =
+        assertThrows(ClientException.class, () -> transport.getText("/pemboom"));
     assertTrue(thrown.getMessage() != null && !thrown.getMessage().contains("secret"));
   }
 

@@ -64,6 +64,7 @@ public final class Layout {
           <a href="/">Dashboard</a>
           <a href="/identities">Identities</a>
           <a href="/keys">Keys</a>
+          <a href="/certificates">Certificates</a>
           <a href="/audit">Audit</a>
           <a href="/harness">Harness</a>
           <form method="post" action="/logout" style="margin:0">

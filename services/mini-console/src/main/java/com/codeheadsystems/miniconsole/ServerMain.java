@@ -5,6 +5,7 @@ import com.codeheadsystems.miniconsole.kms.KeyGroupAdmin;
 import com.codeheadsystems.miniconsole.kms.KmsKeyGroupAdmin;
 import com.codeheadsystems.miniconsole.server.ConsoleConfig;
 import com.codeheadsystems.miniconsole.server.ConsoleServer;
+import com.codeheadsystems.minica.client.MiniCaClient;
 import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
 import com.codeheadsystems.miniidp.client.MiniIdpClient;
 import java.io.IOException;
@@ -32,6 +33,7 @@ public final class ServerMain {
   static final String ENV_IDP_TOKEN = "MINICONSOLE_IDP_TOKEN";
   static final String ENV_KMS_API_TOKEN = "MINICONSOLE_KMS_API_TOKEN";
   static final String ENV_KMS_ADMIN_TOKEN = "MINICONSOLE_KMS_ADMIN_TOKEN";
+  static final String ENV_CA_TOKEN = "MINICONSOLE_CA_TOKEN";
 
   private ServerMain() {
   }
@@ -56,9 +58,10 @@ public final class ServerMain {
     final MiniDirectoryClient directory = wireDirectory(config, env);
     final MiniIdpClient idp = wireIdp(config, env);
     final KeyGroupAdmin keys = wireKms(config, env);
+    final MiniCaClient ca = wireCa(config, env);
 
     final ConsoleServer server =
-        ConsoleServer.create(config, consoleToken, directory, idp, keys, Clock.systemUTC());
+        ConsoleServer.create(config, consoleToken, directory, idp, keys, ca, Clock.systemUTC());
 
     final CountDownLatch shutdown = new CountDownLatch(1);
     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -136,6 +139,24 @@ public final class ServerMain {
         "--kms-tcp is set but no KMS admin token: set " + ENV_KMS_ADMIN_TOKEN
             + " or provide --kms-admin-token-file");
     return new KmsKeyGroupAdmin(config.kmsHost(), config.kmsPort(), apiToken, adminToken);
+  }
+
+  /**
+   * Build the mini-ca client if (and only if) a CA URL is configured. The CA admin token is resolved
+   * from {@code MINICONSOLE_CA_TOKEN} or {@code --ca-token-file} (console-scoped, never argv, never
+   * logged) and is required once a URL is set (issuance/renewal/revocation/log need it; the public
+   * trust-anchor and revocation reads do not, but the client holds one token for the admin surface).
+   *
+   * @return the wired client, or null when mini-ca is not configured.
+   */
+  private static MiniCaClient wireCa(final ConsoleConfig config, final Map<String, String> env)
+      throws IOException {
+    if (config.caUrl() == null) {
+      return null;
+    }
+    final String token = TokenResolver.require(env.get(ENV_CA_TOKEN), config.caTokenFilePath(),
+        "--ca-url is set but no ca token: set " + ENV_CA_TOKEN + " or provide --ca-token-file");
+    return MiniCaClient.http(config.caUrl(), token);
   }
 
   private static String resolveToken(final String fromEnv, final Path file, final String missingMessage)
