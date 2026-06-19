@@ -16,8 +16,8 @@
  *     :services:mini-oidc       human SSO / OpenID Provider (auth-code + PKCE); embeds pk-auth
  *     :services:mini-gateway    forward-auth endpoint for a reverse proxy (Traefik/Caddy/nginx)
  *     :services:mini-directory  identity source of truth: users, groups, roles, service accounts
- *     :services:mini-ca         internal CA for mTLS / workload identity  (roadmap placeholder)
- *     :services:mini-console    optional unified admin UI                 (roadmap placeholder)
+ *     :services:mini-ca         internal CA for mTLS / workload identity
+ *     :services:mini-console    optional unified admin console over the family (Slice 0: runnable skeleton)
  *
  *   libs/      — shared libraries (no transport):
  *     :libs:mini-token   token plane (JWS/JWKS/rotation/revocation/audit) shared by oidc + idp
@@ -58,8 +58,6 @@ include("services:mini-idp:server")
 include("services:mini-oidc")
 include("services:mini-gateway")
 include("services:mini-directory")
-
-// --- Services: roadmap placeholders (documented now; no real logic) --------------------
 include("services:mini-ca")
 include("services:mini-console")
 

@@ -213,6 +213,20 @@ the reverse), so the dependency graph stays acyclic. mini-idp and mini-oidc enab
 `MINI{IDP,OIDC}_KMS_API_TOKEN` / `--kms-api-token-file` — and fall back to the plaintext store when
 it is absent.
 
+> **mini-kms's client is the family's deliberate "client" exception — and it stays under
+> `services/`.** It is the original **socket**-era client (`KmsClient` + its single `KmsClientException`
+> + the `KmsSigningKeyStore` adapter, alongside the two CLIs `client`/`kms-admin`), written before the
+> family settled on the later **HTTP** client-lib pattern. Its embeddable surface is exactly
+> `{KmsClient, KmsClientException, KmsSigningKeyStore}`, consumed today by mini-idp, mini-oidc, and
+> mini-ca. Relocating it into a `libs/mini-kms-client` was considered and is mechanically clean
+> (behavior-preserving, graph stays acyclic), but it was **declined**: the benefit is cosmetic parity
+> with a not-yet-built `libs/<svc>-client` convention, against real churn in three shipping services.
+> Should a future service (e.g. **mini-console**) actually establish a `libs/<svc>-client` convention,
+> mini-kms's client is the **first candidate** to follow it — at which point the `KmsClient` library
+> would move to `libs/mini-kms-client` (with the CLIs staying behind in `:services:mini-kms:client`)
+> and consumers would repoint. Until then, consuming `:services:mini-kms:client` directly is correct,
+> not an oversight.
+
 ### Bootstrap ordering (and why it is not actually circular)
 
 There is an apparent chicken-and-egg: **mini-kms** needs its passphrase; the **auth services** need
