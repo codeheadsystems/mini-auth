@@ -6,9 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.codeheadsystems.miniclient.common.ClientException;
 import com.codeheadsystems.minidirectory.client.model.Account;
+import com.codeheadsystems.minidirectory.client.model.Assignment;
 import com.codeheadsystems.minidirectory.client.model.GrantSpec;
+import com.codeheadsystems.minidirectory.client.model.NewGroup;
+import com.codeheadsystems.minidirectory.client.model.NewHuman;
+import com.codeheadsystems.minidirectory.client.model.NewRole;
+import com.codeheadsystems.minidirectory.client.model.NewServiceAccount;
 import com.codeheadsystems.minidirectory.client.model.PrincipalKind;
 import com.codeheadsystems.minidirectory.client.model.Resolution;
+import com.codeheadsystems.minidirectory.client.model.ServiceAccountCreated;
 import com.codeheadsystems.minidirectory.server.DirectoryServer;
 import com.codeheadsystems.minidirectory.server.ServerConfig;
 import java.io.IOException;
@@ -19,6 +25,7 @@ import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -108,6 +115,61 @@ class HttpMiniDirectoryClientTest {
   @Test
   void getAccount_unknown_collapsesToClientException() {
     assertThrows(ClientException.class, () -> client.getAccount("does-not-exist"));
+  }
+
+  // ---- Mutations (Slice 2) -------------------------------------------------------------------
+
+  @Test
+  void createServiceAccount_returnsAWorkingOneTimeSecret() throws Exception {
+    final ServiceAccountCreated created = client.createServiceAccount(new NewServiceAccount(
+        "CI bot", false, List.of("billing-team"), List.of(), List.of()));
+    // The secret comes back exactly once and must be usable (structural: non-blank, and it
+    // authenticates against the directory). We never assert the literal value.
+    assertTrue(created.secret() != null && !created.secret().isBlank());
+    assertEquals(200, post("/admin/service-accounts/authenticate",
+        "{\"id\":\"" + created.id() + "\",\"secret\":\"" + created.secret() + "\"}"));
+  }
+
+  @Test
+  void createHuman_thenResolveReflectsGroupExpansion() {
+    final Account bob = client.createHuman(new NewHuman("bob", "Bob", false,
+        List.of("billing-team"), List.of(), List.of()));
+    assertEquals("bob", bob.id());
+    assertTrue(client.resolve("bob").grants().contains(new GrantSpec("DECRYPT", "billing")));
+  }
+
+  @Test
+  void updateAssignment_replacesAuthorizationAndResolutionFollows() {
+    // Replace alice's authorization: drop the group, grant ENCRYPT:ledger directly.
+    client.updateAssignment("alice", new Assignment(true, false, List.of(), List.of(),
+        List.of(new GrantSpec("ENCRYPT", "ledger"))));
+    final Resolution resolution = client.resolve("alice");
+    assertTrue(resolution.grants().contains(new GrantSpec("ENCRYPT", "ledger")));
+    // The old group-derived grant is gone (assignment replaces wholesale).
+    assertTrue(resolution.grants().stream().noneMatch(g -> g.equals(new GrantSpec("DECRYPT", "billing"))));
+  }
+
+  @Test
+  void deleteAccount_thenItIsGone() {
+    client.deleteAccount("alice");
+    assertThrows(ClientException.class, () -> client.getAccount("alice"));
+  }
+
+  @Test
+  void createAndDeleteRole_roundTrips() {
+    client.createRole(new NewRole("ledger-writer", "write ledger",
+        List.of(new GrantSpec("ENCRYPT", "ledger"))));
+    assertTrue(client.listRoles().stream().anyMatch(r -> r.id().equals("ledger-writer")));
+    client.deleteRole("ledger-writer");
+    assertTrue(client.listRoles().stream().noneMatch(r -> r.id().equals("ledger-writer")));
+  }
+
+  @Test
+  void createAndDeleteGroup_roundTrips() {
+    client.createGroup(new NewGroup("ops", "ops team", List.of(), List.of()));
+    assertTrue(client.listGroups().stream().anyMatch(g -> g.id().equals("ops")));
+    client.deleteGroup("ops");
+    assertTrue(client.listGroups().stream().noneMatch(g -> g.id().equals("ops")));
   }
 
   private int post(final String path, final String json) throws IOException, InterruptedException {

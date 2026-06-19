@@ -5,13 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.codeheadsystems.minidirectory.client.MiniDirectoryClient;
-import com.codeheadsystems.minidirectory.client.model.Account;
-import com.codeheadsystems.minidirectory.client.model.GrantSpec;
-import com.codeheadsystems.minidirectory.client.model.Group;
-import com.codeheadsystems.minidirectory.client.model.HealthStatus;
-import com.codeheadsystems.minidirectory.client.model.PrincipalKind;
-import com.codeheadsystems.minidirectory.client.model.Resolution;
-import com.codeheadsystems.minidirectory.client.model.Role;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -20,7 +13,6 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.file.Path;
 import java.time.Clock;
-import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -143,42 +135,5 @@ class ConsoleIdentitiesTest {
       }
     }
     return null;
-  }
-
-  /** A canned directory: one human in a group whose role grants DECRYPT on billing. */
-  private static final class FakeDirectory implements MiniDirectoryClient {
-    private final Account alice = new Account("alice", PrincipalKind.HUMAN, "Alice", false, true,
-        List.of("billing-team"), List.of(), List.of());
-
-    @Override
-    public List<Account> listAccounts() {
-      return List.of(alice);
-    }
-
-    @Override
-    public Account getAccount(final String id) {
-      return alice;
-    }
-
-    @Override
-    public List<Group> listGroups() {
-      return List.of(new Group("billing-team", "billing", List.of("billing-reader"), List.of()));
-    }
-
-    @Override
-    public List<Role> listRoles() {
-      return List.of(new Role("billing-reader", "read billing",
-          List.of(new GrantSpec("DECRYPT", "billing"))));
-    }
-
-    @Override
-    public Resolution resolve(final String id) {
-      return new Resolution("alice", false, List.of(new GrantSpec("DECRYPT", "billing")));
-    }
-
-    @Override
-    public HealthStatus health() {
-      return new HealthStatus("ok");
-    }
   }
 }

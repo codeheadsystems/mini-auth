@@ -35,8 +35,11 @@ public final class Layout {
           th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #eee; }
           .muted { color: #888; }
           button { font: inherit; padding: .4rem .8rem; cursor: pointer; }
-          input[type=password] { font: inherit; padding: .4rem; width: 100%; box-sizing: border-box; }
+          input[type=password], input[type=text], textarea { font: inherit; padding: .4rem; width: 100%; box-sizing: border-box; }
           .err { color: #b00020; }
+          .banner { border: 2px solid #b00020; border-radius: .4rem; padding: 1rem; margin-top: 1rem; }
+          .warn { color: #b00020; font-weight: 600; }
+          .secret-value { background: #f3f3f3; padding: .2rem .4rem; word-break: break-all; }
         </style></head>
         <body>
         <header><h1>$TITLE</h1>$NAV</header>
