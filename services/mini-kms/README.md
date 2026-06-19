@@ -149,6 +149,9 @@ over.
 - **`MasterKeyProvider` / `KeyringManager`** — the two interfaces the request
   handler depends on (data plane / control plane). Swapping their implementation
   (e.g. for a remote HSM-backed one) needs no change to request handling.
+- **`PolicyEngine`** — the authorization seam (now living in `:libs:mini-policy`);
+  it decides whether the authenticated `Principal` may use a given key group. The
+  shipped default is `AllowAllPolicyEngine`.
 
 ---
 
@@ -203,7 +206,7 @@ flowchart LR
       crypto["crypto<br/>AesGcm, EnvelopeFormat"]
       keyring["keyring<br/>LocalKeyring, KekEnvelope,<br/>KeyringManager, Keystore"]
       kms["kms<br/>MasterKeyProvider, KmsService,<br/>KmsRequestHandler"]
-      auth["auth<br/>ApiTokenAuthenticator,<br/>KeyAuthorizationPolicy"]
+      auth["auth<br/>ApiTokenAuthenticator,<br/>PolicyEngine (:libs:mini-policy)"]
       protocol["protocol<br/>KmsRequest/Response, codec"]
     end
     server["server<br/>TCP + Unix daemon<br/>ServerMain"]
@@ -232,13 +235,13 @@ tokens, a `plane()` tag on every request type):
 ```mermaid
 flowchart TD
     REQ["incoming request"] --> P{"type.plane()?"}
-    P -->|DATA| DT["validate API token"] --> POL["KeyAuthorizationPolicy<br/>(per key group)"] --> KS["KmsService<br/>(MasterKeyProvider)"]
+    P -->|DATA| DT["validate API token"] --> POL["PolicyEngine<br/>(per key group)"] --> KS["KmsService<br/>(MasterKeyProvider)"]
     P -->|CONTROL| AT["validate ADMIN token"] --> KM["KeyringManager<br/>(create/rotate/…)"]
 ```
 
 - **Data plane** — `GenerateDataKey`, `Encrypt`, `Decrypt`, `ReEncrypt`,
   `Health`. Authenticated by the **API token**; each key-group access passes
-  through a `KeyAuthorizationPolicy`.
+  through a `PolicyEngine` (the authorization seam now lives in `:libs:mini-policy`).
 - **Control plane** — `Create/Rotate/List/Disable/Enable/DestroyVersion`.
   Authenticated by a **separate admin token**.
 - **Root/passphrase rotation** is offline-only (the `kms-admin change-passphrase`
@@ -420,12 +423,13 @@ to `DecryptionFailed` to avoid an oracle.
   data plane; the **admin token** (`MINIKMS_ADMIN_TOKEN`) guards the control
   plane. Compared in **constant time**; applied to both sockets.
 - **Authorization seam:** every data-plane key-group access passes through a
-  `KeyAuthorizationPolicy`. The shipped default (`AllowAllPolicy`) lets any
-  authenticated client use any group — groups still provide isolation and
-  independent rotation. This is the explicit hook for "**KEK groups dependent on
-  the client**": introduce per-client tokens later (mapping each to a distinct
-  `Principal`) and supply a restrictive policy here — with **no change** to the
-  request-handling code that already calls it.
+  `PolicyEngine` (the seam now lives in `:libs:mini-policy`). The shipped default
+  (`AllowAllPolicyEngine`) lets any authenticated client use any group — groups
+  still provide isolation and independent rotation. This is the explicit hook for
+  "**KEK groups dependent on the client**": introduce per-client tokens later
+  (mapping each to a distinct `Principal`) and supply a restrictive engine here
+  (e.g. `GrantBasedPolicyEngine`) — with **no change** to the request-handling
+  code that already calls it.
 
 ---
 
@@ -519,6 +523,8 @@ $A change-passphrase --keystore ~/.mini-kms/keystore.json
 | `--token-file PATH` | `MINIKMS_API_TOKEN_FILE` | — | file holding the API token |
 | `--admin-token-file PATH` | `MINIKMS_ADMIN_TOKEN_FILE` | — | file holding the admin token |
 | `--max-frame-bytes N` | `MINIKMS_MAX_FRAME_BYTES` | `1048576` | per-request size limit |
+| `--idle-timeout-ms N` | `MINIKMS_IDLE_TIMEOUT_MS` | `30000` | drop a connection idle/stalled this long |
+| `--max-connections N` | `MINIKMS_MAX_CONNECTIONS` | `256` | cap on concurrent connections |
 | `--no-tcp` / `--no-unix` | — | — | disable a listener |
 | (secret) | `MINIKMS_API_TOKEN` | — | data-plane token value (preferred over file) |
 | (secret) | `MINIKMS_ADMIN_TOKEN` | — | control-plane token value (preferred over file) |

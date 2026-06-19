@@ -20,7 +20,7 @@ mini-ca verifies it before doing anything else with the CSR:
 ```java
 // CertificateAuthority.issueFromCsr — verify the CSR's self-signature against its OWN public key
 if (!csr.isSignatureValid(new JcaContentVerifierProviderBuilder().build(csr.getSubjectPublicKeyInfo()))) {
-  throw new CaIssuanceException("CSR signature is not valid");
+  throw new CaIssuanceException("CSR signature is invalid");
 }
 ```
 

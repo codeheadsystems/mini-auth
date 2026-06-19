@@ -30,7 +30,7 @@
 | Break | Symptom | Why |
 | --- | --- | --- |
 | mini-directory **down/unreachable** | every `/oauth/token` → `401 invalid_client` (generic); JWKS still 200 | no-oracle: the issuer won't say "directory down." Verified in [lab 03](../tutorials/03-machine-identity-end-to-end.md). |
-| `--directory-url` set, **token missing** | issuer **refuses to start**: *"a directory URL was set but no admin token"* | each issuer authenticates to the directory's admin API. |
+| `--directory-url` set, **token missing** | issuer **refuses to start** — mini-oidc: *"a directory URL was set but no admin token"*; mini-idp: *"no mini-directory token: set MINIIDP_DIRECTORY_TOKEN or provide --directory-token-file"* (mini-idp also *requires* `--directory-url`; mini-oidc treats it as optional) | each issuer authenticates to the directory's admin API. |
 | Wrong `*_DIRECTORY_TOKEN` (not the directory's) | `/admin/...` calls rejected → token requests fail generic | the token must be **mini-directory's** admin token. |
 | mini-kms **down** at issuer startup (`--kms-*` set) | issuer fails to start / can't unwrap signing keys | the wrapped key is unwrapped at boot; no KMS, no key. |
 | `--kms-key-group` **doesn't exist** | unwrap/encrypt fails | create it first: `kms-admin create-key --key <group>`. |

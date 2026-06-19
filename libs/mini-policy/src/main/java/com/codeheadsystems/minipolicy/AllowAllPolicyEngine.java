@@ -1,8 +1,8 @@
 package com.codeheadsystems.minipolicy;
 
 /**
- * Permits everything. This is mini-kms's current default ({@code auth/AllowAllPolicy}, lifted here
- * verbatim in behavior): with a single shared data-plane token there is only one principal, so any
+ * Permits everything. This IS mini-kms's current data-plane default (the former per-service
+ * allow-all policy now lives here as this engine): with a single shared data-plane token there is only one principal, so any
  * authenticated caller may use any key group — groups still provide isolation and independent
  * rotation. Swap in {@link GrantBasedPolicyEngine} once per-client identities exist.
  *

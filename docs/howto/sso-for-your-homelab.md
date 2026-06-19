@@ -56,7 +56,8 @@ and watch `whoami` become reachable only after login. **Prove it locally before 
 Exposing to your LAN/internet is a deliberate step. Do **all** of:
 
 - [ ] **Terminate TLS at the proxy.** Never expose the services' HTTP listeners directly.
-- [ ] **`--secure-cookies`** on mini-oidc (and the gateway) so the session cookie is `Secure`.
+- [ ] **`--secure-cookies`** on mini-oidc so the session cookie is `Secure` (mini-oidc is the only
+      session-cookie writer; the gateway has no such flag).
 - [ ] **Shared hostname.** The session cookie is host-only, `Path=/` — mini-oidc and the gated app must
       share a hostname for the cookie to reach both. Use subpaths or a shared parent domain.
 - [ ] **`/verify` is proxy-only.** mini-gateway must be reachable *only* by the proxy (loopback/Docker

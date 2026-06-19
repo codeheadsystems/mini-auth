@@ -33,9 +33,11 @@ of the JWKS (then it's dropped). No verifier changes are needed.
 
 ## mini-oidc
 
-Same model, same token plane (mini-token's `SigningKeyService`). Rotation is exposed through its admin
-surface — see `services/mini-oidc/README.md` and `/docs` for the exact route. The JWKS at
-`/jwks.json` carries overlapping `kid`s during the retention window, identically to mini-idp.
+Same model, same token plane (mini-token's `SigningKeyService`). **mini-oidc does not currently expose
+a signing-key rotation endpoint** — only mini-idp has `POST /admin/keys/rotate` (mini-oidc's admin
+surface is just `POST`/`GET /admin/clients`, and it only rotates *refresh tokens* internally).
+Rotating mini-oidc's signing keys is an honest seam today. The JWKS at `/jwks.json` still carries
+overlapping `kid`s during the retention window, identically to mini-idp.
 
 ## Verify nothing broke
 

@@ -123,29 +123,29 @@ keys as mini-idp's typed tokens. mini-idp's path is untouched.
 
 The same flow, traced through `server/OidcHandlers.java` and the `service/` stores:
 
-1. **`GET /authorize`** — `authorize` (`OidcHandlers.java:163`) validates the client, exact-matches
+1. **`GET /authorize`** — `authorize` validates the client, exact-matches
    `redirect_uri`, requires `response_type=code`, the `openid` scope, and **PKCE `S256`** (a missing
    or non-S256 method is rejected back to the redirect URI), then parks a `PendingAuthorization`
-   (opaque `requestId` + CSRF token) server-side (`:192`) and returns the login page (or consent if
-   a session already exists).
-2. **Passkey login** — `POST /login/passkey/start` (`:245`) returns the WebAuthn options;
-   `POST /login/passkey/finish` (`:254`) verifies the assertion via pk-auth and resolves the verified
-   `UserHandle` to a username; `completeLogin` (`:277`) creates the SSO session
-   (`sessions.create`, `:282`) and sets the cookie. (`POST /login/recovery` is the backup-code
+   (opaque `requestId` + CSRF token) server-side (`pending.put`) and returns the login page (or
+   consent if a session already exists).
+2. **Passkey login** — `POST /login/passkey/start` (`passkeyStart`) returns the WebAuthn options;
+   `POST /login/passkey/finish` (`passkeyFinish`) verifies the assertion via pk-auth and resolves the
+   verified `UserHandle` to a username; `completeLogin` creates the SSO session
+   (`sessions.create`) and sets the cookie. (`POST /login/recovery` is the backup-code
    fallback.)
-3. **Consent** — `POST /authorize/decision` (`:214`) checks the CSRF token (`requireCsrf`, `:220`,
-   constant-time), filters the requested scopes through mini-policy (`scopeAuthorizer.authorize`,
-   `:229`), mints a one-time `AuthorizationCode` binding client / redirect / subject / PKCE challenge
-   / `auth_time` (`codes.put`, `:232`), and 302s back to the redirect URI with `code` + `state`
-   (`:240`).
-4. **`POST /token` (code grant)** — `authorizationCodeGrant` (`:302`): `authenticateClient` (`:354`)
-   authenticates a confidential client (or accepts a public one); `codes.consume` (`:304`) redeems
-   the code exactly once — a replay revokes the refresh family it first produced (`:307`); the client
-   id, redirect URI, and the **PKCE verifier** are re-checked (`Pkce.verify`, `:315`); then it mints
-   the access token (`:320`) and ID token (`:321`) on mini-token's keys and issues a rotating refresh
-   token (`:322`), binding the code to that refresh family (`:323`).
-5. **`POST /token` (refresh grant)** — `refreshGrant` (`:327`) rotates the presented refresh token
-   (`refreshTokens.rotate`, `:328`): a valid token yields a fresh access / ID / refresh set (carrying
+3. **Consent** — `POST /authorize/decision` (`decision`) checks the CSRF token (`requireCsrf`,
+   constant-time), filters the requested scopes through mini-policy (`scopeAuthorizer.authorize`),
+   mints a one-time `AuthorizationCode` binding client / redirect / subject / PKCE challenge
+   / `auth_time` (`codes.put`), and 302s back to the redirect URI with `code` + `state`.
+4. **`POST /token` (code grant)** — `authorizationCodeGrant`: `authenticateClient`
+   authenticates a confidential client (or accepts a public one); `codes.consume` redeems
+   the code exactly once — a replay revokes the refresh family it first produced (`refreshTokens.revokeFamily`);
+   the client id, redirect URI, and the **PKCE verifier** are re-checked (`Pkce.verify`); then it
+   mints the access token (`tokens.mintAccessToken`) and ID token (`tokens.mintIdToken`) on
+   mini-token's keys and issues a rotating refresh token (`refreshTokens.issue`), binding the code to
+   that refresh family (`codes.bindFamily`).
+5. **`POST /token` (refresh grant)** — `refreshGrant` rotates the presented refresh token
+   (`refreshTokens.rotate`): a valid token yields a fresh access / ID / refresh set (carrying
    the **original** `auth_time`), while re-using an already-rotated token scorches the whole family.
 
 ## Quick start

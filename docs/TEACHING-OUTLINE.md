@@ -1,11 +1,12 @@
-# Teaching mini-auth — documentation outline
+# Teaching mini-auth — documentation outline (historical design doc)
 
-> **What this file is.** A blueprint for a new, course-style documentation set under `docs/`
-> that teaches **how authentication and authorization work in practice**, using the `mini-*`
-> services as the worked example. It is the *plan* — each entry below becomes a real document.
-> It does not replace the existing orientation docs; it sits on top of them.
+> **What this file is.** The original *blueprint* for the course-style documentation set under
+> `docs/` that teaches **how authentication and authorization work in practice**, using the `mini-*`
+> services as the worked example. It is kept as a design/history record of how the set was planned.
 >
-> **Status:** outline / proposal. Nothing here is written yet except this file.
+> **Status:** ✅ realized. The set this file planned now exists — see the concepts, tutorials, howtos,
+> diagrams, and security track under `docs/`. **If you're here to learn, don't start here:** the live
+> syllabus is [`TEACHING.md`](TEACHING.md). This outline is for contributors curious about the design.
 
 ---
 
@@ -114,7 +115,7 @@ them.
 1. **token → mini-kms authorization is DESIGNED, not WIRED.** `KmsRequestHandler` uses a shared
    per-plane bearer token + two fixed principals; it does not parse a JWT or read `grants`.
    `GrantsClaim.toAuthorization()` has **no production caller.**
-2. **mini-kms data plane ships `AllowAllPolicy`** — any authenticated caller is permitted.
+2. **mini-kms data plane ships `AllowAllPolicyEngine`** — any authenticated caller is permitted.
 3. **mini-oidc passkey enrolment (`/register/passkey/**`) is unauthenticated self-enrolment** —
    a real deployment must gate it.
 4. **mini-oidc `--directory-url` is optional**; without it, an empty in-memory directory resolves

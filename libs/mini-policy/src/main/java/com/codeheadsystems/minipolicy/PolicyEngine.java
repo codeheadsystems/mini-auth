@@ -4,7 +4,7 @@ package com.codeheadsystems.minipolicy;
  * The authorization decision function shared across the family:
  * {@code decide(principal, action, resource) -> ALLOW | DENY}.
  *
- * <p>This is the generalization of mini-kms's {@code KeyAuthorizationPolicy}, whose single-purpose
+ * <p>This generalizes mini-kms's former per-key-group key-authorization policy, whose single-purpose
  * {@code isAllowed(Principal, keyGroupId, KeyOperation)} is exactly this question with the
  * key-group as the {@link Resource} and the operation name as the {@link Action}. One engine now
  * answers it for every service: mini-kms gating a key group, mini-gateway gating a route,

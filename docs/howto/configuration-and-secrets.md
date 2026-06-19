@@ -63,8 +63,9 @@ Everything binds `127.0.0.1` unless you set `--host`. Defaults:
 Exposing past loopback is an **explicit decision** with a checklist:
 
 - **Put it behind a TLS reverse proxy.** Don't expose the HTTP listeners directly.
-- **mini-oidc / mini-gateway:** add `--secure-cookies` so the session cookie carries `Secure`. The
-  cookie is already `HttpOnly` + `SameSite=Lax`.
+- **mini-oidc:** add `--secure-cookies` so the session cookie carries `Secure`. The
+  cookie is already `HttpOnly` + `SameSite=Lax`. (mini-oidc is the only session-cookie writer;
+  mini-gateway sets no cookies of its own and has no such flag.)
 - **mini-gateway** is reached by its proxy over the loopback/Docker network and is **never** exposed
   to clients directly; `/verify` must be reachable only by the trusted proxy.
 - **mini-kms** loopback TCP is reachable by every local user (a known, documented open item) — keep it

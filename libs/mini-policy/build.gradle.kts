@@ -2,9 +2,9 @@
  * mini-policy - the generalized authorization decision function.
  *
  * A small, dependency-light library that answers one question for every service in the family:
- * may THIS principal perform THIS action on THIS resource? It is the generalization of
- * mini-kms's `KeyAuthorizationPolicy` (which answers it only for `KeyOperation` against a key
- * group) and of the per-group grant checks a verifier runs over a mini-idp token.
+ * may THIS principal perform THIS action on THIS resource? It generalizes mini-kms's former
+ * per-key-group key-authorization policy (which answered it only for `KeyOperation` against a key
+ * group) and the per-group grant checks a verifier runs over a mini-idp token.
  *
  * Library only — no transport, no HTTP, no CLI. It ships the decision types (Principal, Action,
  * Resource, Grant, Decision), the PolicyEngine seam, and three engines: a SAFE deny-by-default,

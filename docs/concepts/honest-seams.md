@@ -25,7 +25,7 @@ keep a teaching codebase from quietly lying.
 
 The family documents a beautiful contract: a token's `grants` claim maps onto mini-kms's
 authorization model (`sub → Principal.id`, `grants.control → Principal.admin`,
-`grants.groups[] → KeyAuthorizationPolicy`). **That mapping is not a runtime path.**
+`grants.groups[]` → a per-key-group `PolicyEngine` decision (mini-policy)). **That mapping is not a runtime path.**
 
 - `KmsRequestHandler` (`services/mini-kms/core/.../kms/KmsRequestHandler.java`) authenticates with a
   **shared per-plane bearer token** and two fixed principals. It does **not** parse a JWT and does
@@ -40,7 +40,7 @@ labels itself a design exercise.)
 
 ## <a id="2"></a>2. mini-kms data plane ships an allow-all policy
 
-Every data-plane key operation passes through a `KeyAuthorizationPolicy` per key group — but the
+Every data-plane key operation passes through a per-key-group `PolicyEngine` decision — but the
 shipped engine is **`AllowAllPolicyEngine`** (in `libs/mini-policy`): any *authenticated* caller is
 permitted on any key group. (`LocalKeyring.java` notes the day "a real per-group PolicyEngine
 replaces AllowAllPolicyEngine"; that swap is the future per-client decision.)

@@ -6,8 +6,8 @@ package com.codeheadsystems.minitoken.auth;
  * <p>This is a deliberate mirror of mini-kms's {@code KeyOperation} enum. mini-idp does not
  * <em>perform</em> any of these operations; it only names them so that an issued token can
  * carry a set of granted operations per key group. When the future mini-kms verifies one of
- * our tokens it can map this set straight onto its own {@code KeyOperation} /
- * {@code KeyAuthorizationPolicy} without a translation table.
+ * our tokens it can map this set straight onto its own {@code KeyOperation} and a per-key-group
+ * {@code PolicyEngine} decision (mini-policy) without a translation table.
  *
  * <p>Keep these names byte-for-byte identical to mini-kms's enum constants — the contract is
  * the string value that travels in the JWT claim, so a rename here silently breaks the KMS's

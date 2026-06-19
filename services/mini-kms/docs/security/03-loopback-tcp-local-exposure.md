@@ -22,7 +22,7 @@ is unlike the Unix domain socket, which is a filesystem object guarded by
 is also no peer-credential (`SO_PEERCRED`) check on accepted connections, so the
 server never learns *which* local user connected.
 
-With the shipped `AllowAllPolicy`, the shared token is therefore the **sole**
+With the shipped `AllowAllPolicyEngine`, the shared token is therefore the **sole**
 access control for any local process reaching the TCP port.
 
 ## The threat it poses

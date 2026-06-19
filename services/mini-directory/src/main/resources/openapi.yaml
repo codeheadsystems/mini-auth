@@ -15,8 +15,10 @@ info:
     token. Service-account secrets are Argon2id-hashed at rest and returned exactly once, at
     creation; no other endpoint ever returns secret material.
 
-    mini-oidc (humans) and mini-idp (service accounts) are intended to read identities and grants
-    from here; that wiring is deliberately future work — today mini-directory stands alone.
+    mini-idp reads its service accounts from here today — it has no local client registry and
+    authenticates every `/oauth/token` against `POST /admin/service-accounts/authenticate`
+    (required wiring). mini-oidc resolves humans from here when started with `--directory-url`
+    (optional; without it, it falls back to an empty in-memory directory and nobody resolves).
 servers:
   - url: http://127.0.0.1:8466
     description: Default loopback bind address.

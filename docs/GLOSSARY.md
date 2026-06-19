@@ -9,8 +9,9 @@ The vocabulary deliberately follows real systems (AWS/GCP KMS, NIST, the relevan
 RFCs) so the concepts carry over. Each entry says what the term is, **why it matters
 here**, and where it lives in the code.
 
-> New to the project? Read this alongside [`DIRECTION.md`](DIRECTION.md), then follow
-> the reading order in [`LEARNING.md`](LEARNING.md).
+> New to the project? Start with the course front door [`TEACHING.md`](TEACHING.md), and keep this
+> open alongside it. For the architecture map see [`DIRECTION.md`](DIRECTION.md); to read the source
+> in dependency order see [`LEARNING.md`](LEARNING.md).
 
 ---
 
@@ -107,6 +108,15 @@ The token plane lives in **mini-token** (`libs/mini-token`); the issuers are **m
 - **Revocation / denylist** — a list of token ids (`jti`) a verifier can consult to reject
   a specific token before its natural expiry (`mini-token` `RevocationService`). Short TTLs
   are the primary control; revocation is the early kill switch.
+- **CSRF (cross-site request forgery)** — an attack where a malicious site causes a logged-in
+  user's browser to make an unwanted state-changing request using the user's ambient cookies. The
+  family defends it two ways: a **`SameSite=Lax`** session cookie (the browser won't send it on
+  cross-site POSTs), and a **per-pending-authorization CSRF token** required on every state-changing
+  browser POST in mini-oidc (`OidcHandlers`, constant-time checked).
+- **`cnf` (confirmation / proof-of-possession claim, RFC 7800)** — a token claim that would bind
+  the token to a key the holder must prove possession of, so a *stolen* token is useless without
+  that key (turning a bearer token into a sender-constrained one). **Reserved but not enforced** in
+  the family today (`TokenIssuer` writes it null) — an honest seam, not a live control.
 
 ---
 
@@ -136,8 +146,14 @@ The decision model is **mini-policy** (`libs/mini-policy`); the identity source 
   by mini-idp); humans carry no secret and authenticate with passkeys (via mini-oidc).
 - **`grants` claim** — mini-token's per-key-group authorization claim (`token/GrantsClaim`
   over `auth/Authorization`) that maps onto mini-kms's model: `sub → Principal.id`,
-  `grants.control → Principal.admin`, `grants.groups[] → KeyAuthorizationPolicy`. The
-  string values of `auth/KeyOperation` are a deliberate contract — do not rename them.
+  `grants.control → Principal.admin`, `grants.groups[] →` a per-key-group `PolicyEngine`
+  decision (mini-policy). The string values of `auth/KeyOperation` are a deliberate contract —
+  do not rename them.
+- **Least privilege** — grant each principal the *minimum* authority it needs, and no more
+  (narrow grants, scoped tokens, short TTLs, no blanket wildcards). It's the design discipline
+  behind **deny-by-default** (the mechanism that enforces it) and behind the two-plane / two-token
+  splits across the family. The opposite — broad standing authority — is what turns one compromise
+  into total compromise.
 
 ---
 
@@ -180,6 +196,12 @@ From **mini-ca** (`services/mini-ca`), an internal CA for mTLS.
   endpoint before forwarding each request, to gate upstreams that have no auth of their own.
   **mini-gateway**'s `/verify` is that endpoint; it reuses the shared session + JWS
   verification and answers allow/deny.
+- **Confused deputy** — a trusted component tricked into misusing its authority on behalf of a
+  less-privileged caller. Forward-auth is a classic setting: a client could try to *forge* the
+  `X-Auth-*` identity headers, or reach `/verify` directly with a spoofed `X-Forwarded-Uri`, to make
+  the proxy/gateway act on attacker-chosen input. mini-gateway defends it by **always overwriting**
+  the `X-Auth-*` headers (so injected ones are discarded) and by being reachable **only by the
+  trusted proxy**, never by clients directly.
 - **Data plane vs. control plane** — the split between per-request operations (guarded by an
   API token) and management operations (guarded by a separate admin token); mini-kms tags
   every request type with its plane.

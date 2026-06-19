@@ -100,7 +100,7 @@ mini-auth/
 │   ├── mini-idp/   {core, server}           (shipping)
 │   ├── mini-oidc/                           (shipping; human SSO / OpenID Provider, embeds pk-auth)
 │   ├── mini-gateway/                        (shipping; forward-auth for a reverse proxy)
-│   ├── mini-directory/                      (shipping; identity source of truth, standalone)
+│   ├── mini-directory/                      (shipping; identity source of truth; mini-idp reads service accounts from it)
 │   ├── mini-ca/                             (shipping; internal CA, CA key wrapped under mini-kms)
 │   └── mini-console/                        (roadmap placeholder)
 └── libs/                        # shared libraries (no transport)
@@ -153,7 +153,7 @@ mini-auth/
   must still pass unchanged.
 - **The token-claim contract aligns across the family.** mini-idp's `grants` claim maps onto
   mini-kms's authorization model (`sub → Principal.id`, `grants.control → Principal.admin`,
-  `grants.groups[] → KeyAuthorizationPolicy`); `auth/KeyOperation` string values are the contract —
+  `grants.groups[]` → a per-key-group `PolicyEngine` decision (mini-policy)); `auth/KeyOperation` string values are the contract —
   don't rename them. Preserve this mapping in mini-token / mini-policy work. **Note this is a
   *designed* contract, not a wired runtime path:** `KmsRequestHandler` still authenticates with a
   shared per-plane token + fixed principals and ships `AllowAllPolicyEngine` — it does not yet parse a JWT
@@ -208,7 +208,7 @@ services/mini-kms/client/build/install/client/bin/kms-admin --tcp 127.0.0.1:9123
 - **Two planes, two tokens.** Every `RequestType` is tagged `DATA` or `CONTROL` (`RequestPlane`).
   `KmsRequestHandler` (in `core`) routes by plane and validates the matching token — the **API
   token** for data ops, a **separate admin token** for control ops. Data-plane ops also pass
-  through `KeyAuthorizationPolicy` per key group; the shipped `AllowAllPolicyEngine` is the documented
+  through a per-key-group `PolicyEngine` decision (mini-policy); the shipped `AllowAllPolicyEngine` is the documented
   seam for per-client authz later (the thing `mini-policy` generalizes).
 - **The two seams.** `KmsRequestHandler` depends only on `MasterKeyProvider` (data:
   `wrap/unwrap/encrypt/decrypt/keyIdOf`) and `KeyringManager` (control:
@@ -280,7 +280,7 @@ services/mini-idp/server/build/install/server/bin/server --port 8455 --data-dir 
 - **The token contract.** `server/src/main/resources/openapi.yaml` (served at `/openapi.yaml`,
   `/openapi.json`, `/docs`) is authoritative. The `grants` claim (mini-token's
   `token/GrantsClaim` over `auth/Authorization`) maps to mini-kms: `sub → Principal.id`,
-  `grants.control → Principal.admin`, `grants.groups[] → KeyAuthorizationPolicy`. `auth/KeyOperation`
+  `grants.control → Principal.admin`, `grants.groups[]` → a per-key-group `PolicyEngine` decision (mini-policy). `auth/KeyOperation`
   is a **deliberate mirror** of mini-kms's enum — the string values are the contract, do not rename
   them. A `cnf` claim is reserved (RFC 7800) but not enforced yet.
 - **Crypto & formats (hand-rolled bits, now in mini-token).** Ed25519 via the JDK only
@@ -310,8 +310,10 @@ mini-directory is the **single identity source of truth** for the family: it own
 job is **resolution** — turning any stored account into a **mini-policy `Principal` plus a
 fully-expanded, de-duplicated set of `(action, resource)` grants** (roles expand to grants; group
 memberships are inherited), which is exactly what a `mini-policy` decision function consumes. It is
-**shipping but standalone**: the issuers do **not** read from it yet (that is Phase 3/4 work; see the
-open client-registry question in `docs/DIRECTION.md`).
+**shipping and wired in**: mini-idp reads its service accounts from here at every `/oauth/token`
+(required — `--directory-url`; mini-idp keeps no local client registry), and mini-oidc resolves
+humans from here when `--directory-url` is set (optional, in-memory fallback otherwise). See the
+resolved client-registry decision in `docs/DIRECTION.md`.
 
 **Run it locally.** The bootstrap admin token comes from an env var or a file, **never a CLI arg,
 and is never logged**. Loopback by default.

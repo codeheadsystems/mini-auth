@@ -3,9 +3,7 @@
 > **What this is.** The front door to a course-style documentation set that teaches **how
 > authentication and authorization actually work**, using the `mini-*` services as the worked
 > example. It does not replace the orientation docs — it sits on top of them. One screen, then it
-> routes you.
->
-> The blueprint for the whole set is [`TEACHING-OUTLINE.md`](TEACHING-OUTLINE.md).
+> routes you. **This is the live syllabus; start here.**
 
 ## How this set relates to the other docs
 

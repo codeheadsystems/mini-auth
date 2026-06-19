@@ -71,7 +71,7 @@ paths:
         - { name: state, in: query, schema: { type: string } }
         - { name: nonce, in: query, schema: { type: string } }
         - { name: code_challenge, in: query, required: true, schema: { type: string } }
-        - { name: code_challenge_method, in: query, schema: { type: string, enum: [S256, plain] } }
+        - { name: code_challenge_method, in: query, schema: { type: string, enum: [S256] } }
       responses:
         "200": { description: The login or consent HTML page. }
         "302": { description: Redirect to the redirect URI with an error. }

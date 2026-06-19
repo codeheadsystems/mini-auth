@@ -22,8 +22,11 @@ import java.util.concurrent.CountDownLatch;
  *   <li>Bind loopback and serve until interrupted; a shutdown hook stops the HTTP server.</li>
  * </ol>
  *
- * <p>This service does <b>not</b> yet wire into mini-idp or mini-oidc — it stands alone. Those
- * issuers will later read identities and grants from it (see {@code docs/DIRECTION.md}).
+ * <p>mini-idp wires into this service today: it has no local client registry and authenticates
+ * every {@code /oauth/token} against {@code POST /admin/service-accounts/authenticate}, so the
+ * directory is its required identity source. mini-oidc resolves humans from it when started with
+ * {@code --directory-url} (optional; otherwise it uses an empty in-memory directory). See
+ * {@code docs/DIRECTION.md}.
  */
 public final class ServerMain {
 
