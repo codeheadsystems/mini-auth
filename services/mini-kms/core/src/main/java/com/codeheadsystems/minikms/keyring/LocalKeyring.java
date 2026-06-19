@@ -178,7 +178,7 @@ public final class LocalKeyring implements MasterKeyProvider, KeyringManager {
     // Bind the kek_id (group + version) into the AEAD's AAD — not just the plaintext routing header —
     // so "which key wrapped me" is cryptographically authenticated. A tampered or spliced header then
     // fails the GCM tag rather than silently selecting a different key (defense-in-depth for the day
-    // a real per-group PolicyEngine replaces AllowAllPolicy).
+    // a real per-group PolicyEngine replaces AllowAllPolicyEngine).
     final byte[] inner = aesGcm.encrypt(AesGcm.toKey(version.kek), plaintext, bindAad(kekId, aad));
     return new KekEnvelope(kekId, inner).serialize();
   }

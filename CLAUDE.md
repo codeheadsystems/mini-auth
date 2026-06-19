@@ -156,7 +156,7 @@ mini-auth/
   `grants.groups[] → KeyAuthorizationPolicy`); `auth/KeyOperation` string values are the contract —
   don't rename them. Preserve this mapping in mini-token / mini-policy work. **Note this is a
   *designed* contract, not a wired runtime path:** `KmsRequestHandler` still authenticates with a
-  shared per-plane token + fixed principals and ships `AllowAllPolicy` — it does not yet parse a JWT
+  shared per-plane token + fixed principals and ships `AllowAllPolicyEngine` — it does not yet parse a JWT
   or consume `grants` (`GrantsClaim.toAuthorization()` has no production caller). The token → mini-kms
   authorization step is a future seam; see DIRECTION.md's "Wired vs. designed" note.
 - **Don't duplicate foundation code.** Argon2 hashing, the atomic-`0600` JSON store, base64url,
@@ -208,7 +208,7 @@ services/mini-kms/client/build/install/client/bin/kms-admin --tcp 127.0.0.1:9123
 - **Two planes, two tokens.** Every `RequestType` is tagged `DATA` or `CONTROL` (`RequestPlane`).
   `KmsRequestHandler` (in `core`) routes by plane and validates the matching token — the **API
   token** for data ops, a **separate admin token** for control ops. Data-plane ops also pass
-  through `KeyAuthorizationPolicy` per key group; the shipped `AllowAllPolicy` is the documented
+  through `KeyAuthorizationPolicy` per key group; the shipped `AllowAllPolicyEngine` is the documented
   seam for per-client authz later (the thing `mini-policy` generalizes).
 - **The two seams.** `KmsRequestHandler` depends only on `MasterKeyProvider` (data:
   `wrap/unwrap/encrypt/decrypt/keyIdOf`) and `KeyringManager` (control:

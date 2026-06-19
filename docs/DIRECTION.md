@@ -173,7 +173,7 @@ mini-policy is where it is evaluated; mini-directory is where the grants origina
 > the *designed* contract, and the verifier half (`GrantsClaim.toAuthorization()`) exists — but it is
 > **not yet the live runtime path**. Today mini-kms authenticates callers with a shared per-plane
 > bearer token and two fixed principals (`KmsRequestHandler`); it does not parse a JWT or consume a
-> `grants` claim, and ships `AllowAllPolicy` on the data plane. So a learner who picks this headline
+> `grants` claim, and ships `AllowAllPolicyEngine` on the data plane. So a learner who picks this headline
 > relationship to trace through running code will not find the bridge — it is a documented future
 > seam, not current behavior. **What is wired today:** mini-directory → mini-oidc/mini-idp identity
 > resolution; mini-policy decisions inside mini-oidc (scopes) and mini-gateway (routes); and the
@@ -226,7 +226,7 @@ higher layer. The startup sequence:
    secret**, not another service — this is the bottom turtle.
 2. **Provision the signing-key group (one-time, control plane).** The operator runs
    `kms-admin create-key-group idp-signing` (and `oidc-signing`), and ensures mini-kms's data-plane
-   policy authorizes the auth services' API token for those groups (the shipped `AllowAllPolicy`
+   policy authorizes the auth services' API token for those groups (the shipped `AllowAllPolicyEngine`
    permits any authenticated caller; a real `mini-policy` rule gates per group).
 3. **Start the auth services KMS-backed.** With `--kms-*` set, mini-idp / mini-oidc on first run
    mint their initial signing key, wrap it via mini-kms, and persist only ciphertext; on later starts
