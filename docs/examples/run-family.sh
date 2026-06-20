@@ -51,6 +51,9 @@ export MINICA_ADMIN_TOKEN="$(openssl rand -hex 32)"
 # mini-console holds its own login token plus a CONSOLE-SCOPED copy of each downstream admin
 # token (MINICONSOLE_* names, never the downstream var) — the one new secret concentration.
 export MINICONSOLE_ADMIN_TOKEN="$(openssl rand -hex 32)"  # the console login token
+
+echo "MiniConsole admin token: $MINICONSOLE_ADMIN_TOKEN"
+
 export MINICONSOLE_DIRECTORY_TOKEN="$MINIDIR_ADMIN_TOKEN"
 export MINICONSOLE_IDP_TOKEN="$MINIIDP_ADMIN_TOKEN"
 export MINICONSOLE_OIDC_TOKEN="$MINIOIDC_ADMIN_TOKEN"
