@@ -23,10 +23,11 @@ mini-auth is two things:
 > **[docs/DIRECTION.md](docs/DIRECTION.md)** for the whole architecture map.
 
 > ⚠️ **Educational project.** The family uses real, sound cryptographic constructions but is **not
-> audited** and is not a substitute for production identity infrastructure. Six services and both
-> shared libraries (`mini-token`, `mini-policy`) ship and run; only `mini-console` is a roadmap
-> placeholder with no logic yet. Nothing here is a half-built service that *looks* finished —
-> where a module isn't done, it says so.
+> audited** and is not a substitute for production identity infrastructure. All seven services —
+> including `mini-console`, the admin console + exercise harness over the family — and the shared
+> libraries (`mini-token`, `mini-policy`, plus `mini-client-common` and the per-service client libs)
+> ship and run. Nothing here is a half-built service that *looks* finished — where a module isn't
+> done, it says so.
 
 ## The guiding principle
 
@@ -47,7 +48,8 @@ adds the connective tissue (`mini-token`, `mini-policy`) and the new human-facin
 | [mini-gateway](services/mini-gateway) | Forward-auth endpoint for a reverse proxy (Traefik / Caddy / nginx). | service | **shipping** |
 | [mini-ca](services/mini-ca) | Internal CA for mTLS / workload identity; CA key wrapped under mini-kms. | service | **shipping** |
 | [mini-policy](libs/mini-policy) | Generalized `(principal, action, resource) → allow/deny` decision function; the shared authorization engine. | library | **shipping** |
-| `mini-console` | Optional unified admin UI. | service | roadmap (placeholder) |
+| [mini-console](services/mini-console) | Optional unified admin console + exercise harness over the family; adds no new authority. | service | **shipping** |
+| [mini-client-common](libs/mini-client-common) + `*-client` | Shared client HTTP/token/JSON plumbing (no-oracle collapse) + the per-service client libs mini-console consumes. | libraries | **shipping** |
 | **pk-auth** | Passkeys-first library set on Maven Central — a normal dependency, **not vendored**. | external | shipping |
 
 See **[docs/DIRECTION.md](docs/DIRECTION.md)** for the one-line catalog, the architecture diagram,
@@ -74,10 +76,12 @@ mini-auth/
 │   ├── mini-gateway/            #   shipping; forward-auth, reuses mini-token + mini-policy
 │   ├── mini-directory/          #   shipping; identity source of truth
 │   ├── mini-ca/                 #   shipping; internal CA, CA key wrapped under mini-kms
-│   └── mini-console/            #   roadmap placeholder (no logic)
+│   └── mini-console/            #   shipping; admin console + exercise harness over the family
 └── libs/                        # shared libraries (no transport)
     ├── mini-token/              #   library (shipping)
-    └── mini-policy/             #   library (shipping; shared decision engine)
+    ├── mini-policy/             #   library (shipping; shared decision engine)
+    ├── mini-client-common/      #   library (shipping; HTTP/token/JSON plumbing for the client libs)
+    └── mini-{directory,idp,oidc,ca,gateway}-client/   #   libraries (shipping; mini-console's HTTP clients)
 ```
 
 Gradle project paths follow the directories: `:services:mini-kms:core`, `:services:mini-idp:server`,
@@ -113,11 +117,12 @@ rationale, the layout, and the `mini-common` extraction candidates: the
 
 ## Status & intent
 
-Six services (mini-kms, mini-idp, mini-directory, mini-oidc, mini-gateway, mini-ca) and both shared
-libraries (`mini-token`, `mini-policy`) **ship** — they build, test, and run as their READMEs
-describe. `mini-policy` is deliberately small (the decision types, the engine seam, and a
-grant-based engine consumed by four services); only `mini-console` is a roadmap placeholder. The
-longer arc — notably wiring the token →
+All seven services (mini-kms, mini-idp, mini-directory, mini-oidc, mini-gateway, mini-ca,
+mini-console) and the shared libraries (`mini-token`, `mini-policy`, `mini-client-common`, and the
+five `*-client` libs) **ship** — they build, test, and run as their READMEs describe. `mini-policy`
+is deliberately small (the decision types, the engine seam, and a grant-based engine consumed by
+four services); `mini-console` adds no new authority — it is a client of admin surfaces that already
+exist. The longer arc — notably wiring the token →
 mini-kms authorization path end to end (today mini-kms authenticates with shared per-plane tokens;
 the `grants`-claim → KMS mapping is designed but not yet the live runtime path) and the
 `mini-common` extraction — is tracked in the [roadmap](docs/DIRECTION.md#roadmap). Where a module

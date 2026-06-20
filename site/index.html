@@ -339,9 +339,11 @@
     <div class="container">
       <h2>The family at a glance</h2>
       <p>
-        Six deployable services and two shared libraries ship and run. Only <code>mini-console</code>
-        is a roadmap placeholder. <a href="https://github.com/codeheadsystems/pk-auth">pk-auth</a> is
-        an external passkeys library, embedded by mini-oidc.
+        Seven deployable services and the shared libraries all ship and run — including
+        <code>mini-console</code>, the admin console + exercise harness over the whole family (reached
+        through a set of thin per-service client libraries).
+        <a href="https://github.com/codeheadsystems/pk-auth">pk-auth</a> is an external passkeys
+        library, embedded by mini-oidc.
       </p>
       <div style="overflow-x:auto; margin:24px 0;">
         <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
@@ -403,10 +405,10 @@
               <td style="padding:12px 16px; color:var(--green);">shipping</td>
             </tr>
             <tr>
-              <td style="padding:12px 16px;">mini-console</td>
-              <td style="padding:12px 16px;">Optional unified admin UI over the family.</td>
+              <td style="padding:12px 16px;"><a href="https://github.com/codeheadsystems/mini-auth/tree/main/services/mini-console">mini-console</a></td>
+              <td style="padding:12px 16px;">Optional unified admin console + exercise harness over the family — adds no new authority.</td>
               <td style="padding:12px 16px;">service</td>
-              <td style="padding:12px 16px; color:var(--amber);">roadmap</td>
+              <td style="padding:12px 16px; color:var(--green);">shipping</td>
             </tr>
           </tbody>
         </table>

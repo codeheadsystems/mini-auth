@@ -169,5 +169,6 @@ You've now seen the whole DAG: `mini-policy` + `mini-token` underpin `mini-kms`,
 and the issuers; `mini-oidc` / `mini-gateway` / `mini-ca` compose them at the edges; and the keys
 that sign tokens are themselves wrapped by the KMS. Good next steps: implement a `PolicyEngine`
 of your own, swap a `DocumentStore` or `UserDirectory` SPI, or add a finding to a service's
-`docs/security/`. `mini-console` (`services/mini-console`) is the one remaining roadmap
-placeholder — a natural place to build something new on top of these admin APIs.
+`docs/security/`. `mini-console` (`services/mini-console`) now ships too — the admin console +
+exercise harness over every service above (reached through the `libs/*-client` libraries); it is a
+worked example of building *on top of* these admin APIs without adding any new authority.
