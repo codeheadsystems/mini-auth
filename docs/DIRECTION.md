@@ -172,10 +172,12 @@ Principal.admin`, `grants.groups[]` → a per-key-group `PolicyEngine` decision 
 mini-policy is where it is evaluated; mini-directory is where the grants originate.
 
 > **Wired vs. designed — read this before tracing the token → mini-kms path.** The mapping above is
-> the *designed* contract, and the verifier half (`GrantsClaim.toAuthorization()`) exists — but it is
-> **not yet the live runtime path**. Today mini-kms authenticates callers with a shared per-plane
-> bearer token and two fixed principals (`KmsRequestHandler`); it does not parse a JWT or consume a
-> `grants` claim, and ships `AllowAllPolicyEngine` on the data plane. So a learner who picks this headline
+> the *designed* contract, and the verifier half (`GrantsClaim.toAuthorization()`) exists and now has
+> a production caller — **mini-gateway**'s `BearerAuthenticator`, which maps a machine token's `grants`
+> into `keyGroup:OPERATION` scopes for a forward-auth `SCOPE` decision. But it is **not yet the live
+> runtime path into mini-kms**. Today mini-kms authenticates callers with a shared per-plane bearer
+> token and two fixed principals (`KmsRequestHandler`); it does not parse a JWT or consume a `grants`
+> claim, and ships `AllowAllPolicyEngine` on the data plane. So a learner who picks this headline
 > relationship to trace through running code will not find the bridge — it is a documented future
 > seam, not current behavior. **What is wired today:** mini-directory → mini-oidc/mini-idp identity
 > resolution; mini-policy decisions inside mini-oidc (scopes) and mini-gateway (routes); and the

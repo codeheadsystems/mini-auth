@@ -5,11 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.codeheadsystems.minigateway.auth.JwksProvider;
 import com.codeheadsystems.minigateway.store.JsonStore;
+import com.codeheadsystems.minitoken.auth.Authorization;
+import com.codeheadsystems.minitoken.auth.Grant;
+import com.codeheadsystems.minitoken.auth.KeyOperation;
 import com.codeheadsystems.minitoken.service.SigningKeyService;
 import com.codeheadsystems.minitoken.service.SigningKeyService.Signer;
 import com.codeheadsystems.minitoken.session.SessionService;
 import com.codeheadsystems.minitoken.session.Sessions;
 import com.codeheadsystems.minitoken.store.TokenStoreDocuments.SigningKeys;
+import com.codeheadsystems.minitoken.token.GrantsClaim;
 import com.codeheadsystems.minitoken.token.Jws;
 import com.codeheadsystems.minitoken.token.JwsHeader;
 import com.codeheadsystems.minitoken.util.RandomIds;
@@ -24,6 +28,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,10 +63,14 @@ class ForwardAuthTest {
         new RandomIds(), clock, Duration.ofMinutes(30));
 
     final Path routes = dir.resolve("routes.json");
+    // The /kms route is gated on a mini-idp machine-token scope (keyGroup:OPERATION) — the dialect a
+    // grants claim maps to — so the SCOPE branch can be exercised by a machine token, not just an
+    // OIDC-shaped one.
     Files.writeString(routes, """
         {"routes":[
           {"pathPrefix":"/public","access":"PUBLIC"},
           {"pathPrefix":"/admin","access":"SCOPE","scope":"admin"},
+          {"pathPrefix":"/kms","access":"SCOPE","scope":"billing:ENCRYPT"},
           {"pathPrefix":"/","access":"AUTHENTICATED"}
         ]}""");
 
@@ -143,6 +152,38 @@ class ForwardAuthTest {
     assertEquals(401, response.statusCode(), "a wrong-audience token does not authenticate");
   }
 
+  @Test
+  void miniIdpMachineTokenSatisfiesAScopeRouteFromItsGrantsClaim() throws Exception {
+    // A mini-idp machine token carries NO top-level `scope` — its authority is in the `grants` claim.
+    // The gateway maps grants → keyGroup:OPERATION scopes, so this token satisfies the /kms SCOPE
+    // route (billing:ENCRYPT). Before the dialect fix it authenticated but carried zero scopes.
+    final String token = mintMachineToken("svc-kms", new Authorization(false,
+        List.of(Grant.of("billing", KeyOperation.ENCRYPT, KeyOperation.DECRYPT))));
+    final HttpResponse<String> response = verify("GET", "/kms/encrypt", Map.of(
+        "Authorization", "Bearer " + token, "Accept", "application/json"));
+    assertEquals(200, response.statusCode(), "the machine token's grant covers billing:ENCRYPT");
+    assertEquals("svc-kms", response.headers().firstValue("X-Auth-Subject").orElse(null));
+  }
+
+  @Test
+  void miniIdpMachineTokenWithoutTheGrantedOperationIsForbidden() throws Exception {
+    // The same machine identity, but only DECRYPT on billing — it must NOT satisfy billing:ENCRYPT.
+    final String token = mintMachineToken("svc-kms", new Authorization(false,
+        List.of(Grant.of("billing", KeyOperation.DECRYPT))));
+    final HttpResponse<String> response = verify("GET", "/kms/encrypt", Map.of(
+        "Authorization", "Bearer " + token, "Accept", "application/json"));
+    assertEquals(403, response.statusCode(), "DECRYPT does not cover the route's billing:ENCRYPT");
+  }
+
+  @Test
+  void miniIdpControlPlaneTokenIsAllowedEverywhere() throws Exception {
+    // grants.control → admin: a control-plane machine token is allowed at any SCOPE route.
+    final String token = mintMachineToken("svc-root", new Authorization(true, List.of()));
+    final HttpResponse<String> response = verify("GET", "/admin/panel", Map.of(
+        "Authorization", "Bearer " + token, "Accept", "application/json"));
+    assertEquals(200, response.statusCode(), "grants.control maps to admin, allowed everywhere");
+  }
+
   // ---- helpers -------------------------------------------------------------------------------
 
   private String mintAccessToken(final String subject, final String scope, final String audience) {
@@ -152,6 +193,21 @@ class ForwardAuthTest {
     claims.put("sub", subject);
     claims.put("aud", audience);
     claims.put("scope", scope);
+    claims.put("iat", now);
+    claims.put("nbf", now);
+    claims.put("exp", now + 300);
+    final Signer signer = signingKeys.currentSigner();
+    return Jws.sign(JwsHeader.forKid(signer.kid()), claims, signer.privateKey());
+  }
+
+  /** Mint a mini-idp-shaped machine token: authority in a {@code grants} claim, no top-level scope. */
+  private String mintMachineToken(final String subject, final Authorization authorization) {
+    final long now = clock.instant().getEpochSecond();
+    final Map<String, Object> claims = new LinkedHashMap<>();
+    claims.put("iss", ISSUER);
+    claims.put("sub", subject);
+    claims.put("aud", AUDIENCE);
+    claims.put("grants", GrantsClaim.from(authorization));
     claims.put("iat", now);
     claims.put("nbf", now);
     claims.put("exp", now + 300);
