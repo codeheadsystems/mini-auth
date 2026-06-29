@@ -9,9 +9,9 @@ of curling six admin APIs by hand. It has **two faces in one process**:
    services already expose (each backed by a per-service client library).
 2. **Exercise harness** — scripted end-to-end flows that drive the family the way a real client
    would (issue an m2m token, run OIDC code+PKCE, mint/renew/revoke a cert, rotate a signing key, hit
-   the gateway's forward-auth) and **verify the result offline** — a signature against the JWKS, a
-   cert chain to the CA root, the gateway's allow/deny decision — reporting pass/fail/skip without
-   ever logging a secret.
+   the gateway's forward-auth, or run the whole chain identity→token→gateway in one go) and **verify
+   the result offline** — a signature against the JWKS, a cert chain to the CA root, the gateway's
+   allow/deny decision — reporting pass/fail/skip without ever logging a secret.
 
 It adds **no new authority.** Every mutation it performs is one the operator could perform by curling
 an admin API with the same downstream token; the console invents no new trust boundary and stores no
@@ -71,9 +71,14 @@ cryptographic/state assertion verified **offline**, not just an HTTP 200. A flow
 | **Certificate lifecycle** | local CSR → `issue` → `renew` → `revoke` | leaf chains to the CA root; revoked serial appears in the list | `--ca-url` |
 | **OIDC code + PKCE** | build `/authorize` (S256) → `exchangeCode` → `userinfo` → `refresh` | id_token verifies offline; refresh rotates (old refused). *Passkey login → SKIP unless a code is supplied.* | `--oidc-url` |
 | **Gateway forward-auth** | `gateway.verify` with (a) no creds, (b) a bearer, (c) insufficient scope | (a) → 302/401, (b) → 200, (c) → 403 | `--gateway-url` (the bearer branches need an access token) |
+| **Full chain (identity → token → gateway)** | `directory.resolve` → `idp.token` → `gateway.verify` with the minted token | identity resolves; the gateway authorizes the same token it was just issued (verified offline) | `--directory-url` + `--idp-url` + `--gateway-url` + a service-account id/secret |
+
+The full-chain flow is the one runnable thing that demonstrates the headline goal — **identity →
+token → gateway verifies → resource** — in a single exercise, with no manual copy-paste in the seam.
 
 The Harness page can **run all** the no-credential flows at once and show a `X passed, Y skipped, Z
-failed` tally; the credential-needing token flows are reported SKIP (run those individually).
+failed` tally; the credential-needing token flows (m2m, signing-key rotation, full chain) are
+reported SKIP (run those individually).
 
 ## The `/api` surface
 

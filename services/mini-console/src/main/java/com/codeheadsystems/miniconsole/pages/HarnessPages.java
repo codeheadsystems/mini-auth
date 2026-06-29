@@ -4,6 +4,7 @@ import com.codeheadsystems.miniconsole.harness.Exercise;
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
 import com.codeheadsystems.miniconsole.harness.ExerciseResult;
 import com.codeheadsystems.miniconsole.harness.flows.CertLifecycleFlow;
+import com.codeheadsystems.miniconsole.harness.flows.FullChainFlow;
 import com.codeheadsystems.miniconsole.harness.flows.GatewayVerifyFlow;
 import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 import com.codeheadsystems.miniconsole.harness.flows.OidcCodePkceFlow;
@@ -30,17 +31,20 @@ public final class HarnessPages {
    * input (it generates its own CSR). Each exercise's form is shown only when its backend is wired,
    * else a note pointing at the flag that wires it. The mutating flows carry an explicit warning.
    *
-   * @param registry         the registered exercises.
-   * @param idpAvailable     whether a mini-idp client is wired (gates the idp flows).
-   * @param caAvailable      whether a mini-ca client is wired (gates the certificate flow).
-   * @param oidcAvailable    whether a mini-oidc client is wired (gates the OIDC flow).
-   * @param gatewayAvailable whether a mini-gateway client is wired (gates the gateway flow).
-   * @param csrf             the CSRF token for the run form(s) and the nav (escaped here).
+   * @param registry           the registered exercises.
+   * @param idpAvailable       whether a mini-idp client is wired (gates the idp flows).
+   * @param caAvailable        whether a mini-ca client is wired (gates the certificate flow).
+   * @param oidcAvailable      whether a mini-oidc client is wired (gates the OIDC flow).
+   * @param gatewayAvailable   whether a mini-gateway client is wired (gates the gateway flow).
+   * @param fullChainAvailable whether the directory, idp, AND gateway are all wired (gates the
+   *                           full-chain flow, which spans all three).
+   * @param csrf               the CSRF token for the run form(s) and the nav (escaped here).
    * @return a complete HTML document.
    */
   public static String list(final ExerciseRegistry registry, final boolean idpAvailable,
                             final boolean caAvailable, final boolean oidcAvailable,
-                            final boolean gatewayAvailable, final String csrf) {
+                            final boolean gatewayAvailable, final boolean fullChainAvailable,
+                            final String csrf) {
     final StringBuilder body = new StringBuilder();
     body.append("<p class=\"muted\">Run an end-to-end flow against the wired services and verify the "
         + "result. Credentials you enter are used for the single run and never stored.</p>");
@@ -59,6 +63,7 @@ public final class HarnessPages {
       final boolean isCert = CertLifecycleFlow.ID.equals(exercise.id());
       final boolean isOidc = OidcCodePkceFlow.ID.equals(exercise.id());
       final boolean isGateway = GatewayVerifyFlow.ID.equals(exercise.id());
+      final boolean isFullChain = FullChainFlow.ID.equals(exercise.id());
       if (KeyRotationFlow.ID.equals(exercise.id())) {
         body.append("<p class=\"warn\">This exercise rotates a real mini-idp signing key.</p>");
       } else if (isCert) {
@@ -70,6 +75,9 @@ public final class HarnessPages {
         body.append(oidcAvailable ? oidcRunForm(exercise.id(), csrf) : requires("--oidc-url"));
       } else if (isGateway) {
         body.append(gatewayAvailable ? gatewayRunForm(exercise.id(), csrf) : requires("--gateway-url"));
+      } else if (isFullChain) {
+        body.append(fullChainAvailable ? fullChainRunForm(exercise.id(), csrf)
+            : requires("--directory-url, --idp-url, and --gateway-url"));
       } else {
         body.append(idpAvailable ? runForm(exercise.id(), csrf) : requires("--idp-url"));
       }
@@ -206,6 +214,24 @@ public final class HarnessPages {
           scope does NOT cover to exercise the forbid branch:</p>
           <p><label>Bearer access token (optional)<br><input type="password" name="bearerToken" autocomplete="off"></label></p>
           <p><label>Scope-gated path (optional)<br><input type="text" name="scopePath" autocomplete="off"></label></p>
+          <button type="submit">Run</button>
+        </form>
+        """.replace("$ID", Layout.escape(exerciseId)).replace("$CSRF", Layout.escape(csrf));
+  }
+
+  /**
+   * The full-chain run form. The service-account id + secret drive the directory resolution and the
+   * token mint (without them the flow honestly SKIPs); the gated path is where the minted token is
+   * presented to the gateway. The secret is a password input over a POST body, so it never lands in a
+   * URL or a log.
+   */
+  private static String fullChainRunForm(final String exerciseId, final String csrf) {
+    return """
+        <form method="post" action="/harness/$ID/run" style="margin-top:.5rem">
+          <input type="hidden" name="csrf" value="$CSRF">
+          <p><label>Service-account id<br><input type="text" name="clientId" autocomplete="off"></label></p>
+          <p><label>Service-account secret<br><input type="password" name="clientSecret" autocomplete="off"></label></p>
+          <p><label>Gated path<br><input type="text" name="path" value="/" autocomplete="off"></label></p>
           <button type="submit">Run</button>
         </form>
         """.replace("$ID", Layout.escape(exerciseId)).replace("$CSRF", Layout.escape(csrf));
