@@ -120,6 +120,41 @@ The token plane lives in **mini-token** (`libs/mini-token`); the issuers are **m
 
 ---
 
+## Passkeys: WebAuthn
+
+Human authentication lives in **mini-oidc** (`services/mini-oidc`), which embeds **pk-auth** to run
+the ceremonies. A passkey replaces a shared secret with a key pair, so there is nothing secret on the
+server to phish or breach.
+
+- **WebAuthn** — the W3C browser standard (exposed via `navigator.credentials.create`/`get`) that lets
+  a site register and use public-key credentials, paired with CTAP (the protocol to the authenticator
+  device). It is the mechanism behind passkeys.
+- **Passkey** — the consumer-friendly name for a WebAuthn credential: a per-site key pair whose
+  **private** half stays in the device's secure hardware and whose **public** half is all the server
+  stores. mini-oidc's humans authenticate with one (`auth/PkAuthHumanAuthenticator`).
+- **Challenge** — a fresh random value the server issues at the start of each ceremony; the
+  authenticator must sign *it* (challenge–response), so a captured response can't be replayed. (The
+  same anti-replay idea as a crypto nonce, but issued per login attempt.)
+- **Assertion** — the signed response produced at **login** (`navigator.credentials.get`): a signature
+  over the challenge (plus context) proving possession of the private key. mini-oidc reads the
+  authenticated user handle off the *verified* assertion and nothing else (`finishAssertion`).
+- **Attestation** — the signed statement produced once at **registration**
+  (`navigator.credentials.create`): it certifies the new key and the authenticator that made it.
+  (Distinct from an assertion, which is produced every login.)
+- **RP-ID (Relying Party ID)** — the domain a credential is bound to (e.g. `oidc.example`). The browser
+  fires a credential only when the page's origin matches the RP-ID, and the server checks it on
+  verification — the binding that makes a credential unusable on a look-alike site. mini-oidc sets it
+  with `--rp-id`.
+- **Origin** — the scheme + host + port of the page running the ceremony (e.g.
+  `https://oidc.example`), stamped into the signed data and verified server-side against the
+  configured `--rp-origin`. The origin binding (with the RP-ID) is what makes WebAuthn **phishing
+  resistant**: a forwarded ceremony fails because the signed origin is wrong.
+- **pk-auth** — the external passkey library (`com.codeheadsystems:pk-auth-core`, WebAuthn4J under the
+  hood) mini-oidc embeds to run both ceremonies and store credentials behind swappable SPIs. It is
+  *not* vendored — see `auth/PasskeyStack`.
+
+---
+
 ## Identity & authorization
 
 The decision model is **mini-policy** (`libs/mini-policy`); the identity source of truth is

@@ -13,7 +13,7 @@ actor.**
 | | **client-credentials** | **authorization-code + PKCE** |
 | --- | --- | --- |
 | Actor | a machine (service account) | a human, via a browser |
-| Proves identity with | `client_secret` | a passkey (WebAuthn) |
+| Proves identity with | `client_secret` | a passkey (WebAuthn) — see [`what-a-passkey-is`](what-a-passkey-is.md) |
 | Steps | one POST | a multi-step browser redirect dance |
 | Issuer | mini-idp | mini-oidc |
 | Returns | access token | **ID token** + access token (+ refresh) |

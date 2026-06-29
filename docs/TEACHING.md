@@ -56,6 +56,7 @@ proves it. Do them in order and each one earns the next. (This is a different or
 | **1** | See a decision as a pure function; explain deny-by-default | [`authorization-model`](concepts/authorization-model.md) | [`01-resolve-a-principal`](tutorials/01-resolve-a-principal.md) |
 | **2** | Say what a signed token *is* and verify one offline, by hand | [`what-a-token-is`](concepts/what-a-token-is.md) | [`02-build-and-verify-a-token-by-hand`](tutorials/02-build-and-verify-a-token-by-hand.md) ← **keystone** |
 | **3** | Trace a machine identity end to end | [`oauth-and-oidc-flows`](concepts/oauth-and-oidc-flows.md) | [`03-machine-identity-end-to-end`](tutorials/03-machine-identity-end-to-end.md) |
+| **3.5** | Explain how a passkey proves identity without a shared secret | [`what-a-passkey-is`](concepts/what-a-passkey-is.md) | *(see it in [`04`](tutorials/04-human-sso-end-to-end.md))* |
 | **4** | Run a human SSO login: PKCE, passkeys, sessions, refresh | [`sessions-vs-tokens`](concepts/sessions-vs-tokens.md) | [`04-human-sso-end-to-end`](tutorials/04-human-sso-end-to-end.md) |
 | **5** | Gate a no-auth app via forward-auth | *(reuse stage 4)* | [`05-gate-a-no-auth-app`](tutorials/05-gate-a-no-auth-app.md) |
 | **6** | Explain how the family protects its own keys | [`envelope-encryption-and-kms`](concepts/envelope-encryption-and-kms.md) | [`06-protect-the-signing-keys`](tutorials/06-protect-the-signing-keys.md) |
