@@ -5,6 +5,7 @@ import com.codeheadsystems.miniconsole.harness.Exercise;
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
 import com.codeheadsystems.miniconsole.harness.ExerciseResult;
 import com.codeheadsystems.miniconsole.harness.flows.CertLifecycleFlow;
+import com.codeheadsystems.miniconsole.harness.flows.FullChainFlow;
 import com.codeheadsystems.miniconsole.harness.flows.GatewayVerifyFlow;
 import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 import com.codeheadsystems.miniconsole.harness.flows.M2mTokenFlow;
@@ -91,6 +92,7 @@ public final class ConsoleHandlers {
   private final CertLifecycleFlow certLifecycleFlow;
   private final OidcCodePkceFlow oidcFlow;
   private final GatewayVerifyFlow gatewayFlow;
+  private final FullChainFlow fullChainFlow;
   private final OpenApiDocument openApi;
 
   /**
@@ -111,6 +113,7 @@ public final class ConsoleHandlers {
    * @param certLifecycleFlow the certificate-lifecycle flow (dispatched by its run route).
    * @param oidcFlow          the OIDC code+PKCE flow (dispatched by its run route).
    * @param gatewayFlow       the gateway forward-auth flow (dispatched by its run route).
+   * @param fullChainFlow     the full-chain identity→token→gateway flow (dispatched by its run route).
    * @param openApi           the loaded OpenAPI spec for the read-only {@code /api} JSON surface.
    */
   public ConsoleHandlers(final ConsoleSession session, final AdminAuthenticator auth,
@@ -120,7 +123,8 @@ public final class ConsoleHandlers {
                          final MiniGatewayClient gateway, final ExerciseRegistry exercises,
                          final M2mTokenFlow m2mFlow, final KeyRotationFlow keyRotationFlow,
                          final CertLifecycleFlow certLifecycleFlow, final OidcCodePkceFlow oidcFlow,
-                         final GatewayVerifyFlow gatewayFlow, final OpenApiDocument openApi) {
+                         final GatewayVerifyFlow gatewayFlow, final FullChainFlow fullChainFlow,
+                         final OpenApiDocument openApi) {
     this.session = session;
     this.auth = auth;
     this.cookies = cookies;
@@ -138,6 +142,7 @@ public final class ConsoleHandlers {
     this.certLifecycleFlow = certLifecycleFlow;
     this.oidcFlow = oidcFlow;
     this.gatewayFlow = gatewayFlow;
+    this.fullChainFlow = fullChainFlow;
     this.openApi = openApi;
   }
 
@@ -170,6 +175,7 @@ public final class ConsoleHandlers {
         .route("POST", "/harness/cert-lifecycle/run", this::runCertLifecycle)
         .route("POST", "/harness/oidc-pkce/run", this::runOidcPkce)
         .route("POST", "/harness/gateway-verify/run", this::runGatewayVerify)
+        .route("POST", "/harness/full-chain/run", this::runFullChain)
         .route("POST", "/harness/run-all", this::runAll)
         // mini-oidc relying-party clients (Slice 6): list + register (one-time secret banner).
         .route("GET", "/clients", this::clients)
@@ -495,7 +501,7 @@ public final class ConsoleHandlers {
       return htmlWithCsrf(HarnessPages.notConfigured(token), token);
     }
     return htmlWithCsrf(HarnessPages.list(exercises, idp != null, ca != null, oidc != null,
-        gateway != null, token), token);
+        gateway != null, directory != null && idp != null && gateway != null, token), token);
   }
 
   /** Run the machine-to-machine token flow with the operator-supplied client id + secret. */
@@ -586,6 +592,33 @@ public final class ConsoleHandlers {
   }
 
   /**
+   * Run the full-chain flow (identity → token → gateway, end to end). Session-required and
+   * CSRF-guarded. It needs all three of mini-directory, mini-idp, and mini-gateway wired; the form
+   * supplies the service-account id + secret (always) and an optional gated path. Without the
+   * credentials the flow honestly SKIPs. The secret lives only for the run and is never stored or
+   * logged.
+   */
+  private HttpResponse runFullChain(final RequestContext context) {
+    final HttpResponse redirect = requireSession(context);
+    if (redirect != null) {
+      return redirect;
+    }
+    final String token = csrf.mint();
+    if (directory == null || idp == null || gateway == null) {
+      return htmlWithCsrf(HarnessPages.notConfigured(token), token);
+    }
+    final Map<String, String> form = context.formParams();
+    if (!csrf.verify(context.cookie(Cookies.CSRF), form.get("csrf"))) {
+      throw ApiException.badRequest("invalid or missing CSRF token");
+    }
+    final FullChainFlow.Inputs inputs = new FullChainFlow.Inputs(
+        form.getOrDefault("clientId", ""), form.getOrDefault("clientSecret", ""),
+        form.getOrDefault("path", "/"));
+    final ExerciseResult result = fullChainFlow.run(directory, idp, gateway, inputs);
+    return htmlWithCsrf(HarnessPages.result(result, token), token);
+  }
+
+  /**
    * Run every exercise that can run without operator-supplied credentials and render a summary line
    * plus each result. Session-required and CSRF-guarded. The flows that need a per-run secret (the m2m
    * token + signing-key rotation) are honestly reported SKIP rather than run with no credentials; the
@@ -620,6 +653,9 @@ public final class ConsoleHandlers {
     results.add(gateway != null
         ? gatewayFlow.run(gateway, new GatewayVerifyFlow.Inputs("GET", "/", "", ""))
         : skipped(gatewayFlow, "mini-gateway is not configured (set --gateway-url)"));
+    // The full chain needs a service-account id + secret — report SKIP, never a fake PASS.
+    results.add(skipped(fullChainFlow,
+        "needs a service-account id + secret — run it individually from the Harness page"));
     return htmlWithCsrf(HarnessPages.summary(results, token), token);
   }
 
@@ -685,6 +721,10 @@ public final class ConsoleHandlers {
     }
     if (GatewayVerifyFlow.ID.equals(exerciseId)) {
       return gateway != null;
+    }
+    if (FullChainFlow.ID.equals(exerciseId)) {
+      // The full chain spans the directory, the IDP, and the gateway — all three must be wired.
+      return directory != null && idp != null && gateway != null;
     }
     // The remaining flows (m2m token, signing-key rotation) are backed by mini-idp.
     return idp != null;

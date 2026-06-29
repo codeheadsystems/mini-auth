@@ -2,6 +2,7 @@ package com.codeheadsystems.miniconsole.server;
 
 import com.codeheadsystems.miniconsole.harness.ExerciseRegistry;
 import com.codeheadsystems.miniconsole.harness.flows.CertLifecycleFlow;
+import com.codeheadsystems.miniconsole.harness.flows.FullChainFlow;
 import com.codeheadsystems.miniconsole.harness.flows.GatewayVerifyFlow;
 import com.codeheadsystems.miniconsole.harness.flows.KeyRotationFlow;
 import com.codeheadsystems.miniconsole.harness.flows.M2mTokenFlow;
@@ -162,19 +163,21 @@ public final class ConsoleServer {
       throws IOException {
     final ConsoleSession session = new ConsoleSession(config.dataDir(), clock, config.sessionTtl());
     // The exercise harness: the m2m token flow (Slice 3), the signing-key rotation flow (Slice 4),
-    // the certificate-lifecycle flow (Slice 5), the OIDC code+PKCE flow (Slice 6), and the gateway
-    // forward-auth flow (Slice 7). Each flow uses the matching wired client.
+    // the certificate-lifecycle flow (Slice 5), the OIDC code+PKCE flow (Slice 6), the gateway
+    // forward-auth flow (Slice 7), and the full-chain flow (identity → token → gateway, end to end).
+    // Each flow uses the matching wired client(s).
     final M2mTokenFlow m2mFlow = new M2mTokenFlow(clock);
     final KeyRotationFlow keyRotationFlow = new KeyRotationFlow(clock);
     final CertLifecycleFlow certLifecycleFlow = new CertLifecycleFlow();
     final OidcCodePkceFlow oidcFlow = new OidcCodePkceFlow(clock);
     final GatewayVerifyFlow gatewayFlow = new GatewayVerifyFlow();
+    final FullChainFlow fullChainFlow = new FullChainFlow();
     final ExerciseRegistry exercises = new ExerciseRegistry(
-        List.of(m2mFlow, keyRotationFlow, certLifecycleFlow, oidcFlow, gatewayFlow));
+        List.of(m2mFlow, keyRotationFlow, certLifecycleFlow, oidcFlow, gatewayFlow, fullChainFlow));
     final ConsoleHandlers handlers = new ConsoleHandlers(
         session, new AdminAuthenticator(consoleToken), new Cookies(config.secureCookies()),
         new Csrf(), config.sessionTtl().toSeconds(), directory, idp, keys, ca, oidc, gateway,
-        exercises, m2mFlow, keyRotationFlow, certLifecycleFlow, oidcFlow, gatewayFlow,
+        exercises, m2mFlow, keyRotationFlow, certLifecycleFlow, oidcFlow, gatewayFlow, fullChainFlow,
         OpenApiDocument.load());
     final Router router = handlers.router();
 

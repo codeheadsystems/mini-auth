@@ -169,8 +169,10 @@ mini-auth/
   don't rename them. Preserve this mapping in mini-token / mini-policy work. **Note this is a
   *designed* contract, not a wired runtime path:** `KmsRequestHandler` still authenticates with a
   shared per-plane token + fixed principals and ships `AllowAllPolicyEngine` — it does not yet parse a JWT
-  or consume `grants` (`GrantsClaim.toAuthorization()` has no production caller). The token → mini-kms
-  authorization step is a future seam; see DIRECTION.md's "Wired vs. designed" note.
+  or consume `grants`. (`GrantsClaim.toAuthorization()` now *does* have a production caller, but it is
+  **mini-gateway**'s `BearerAuthenticator` mapping a machine token's `grants` into forward-auth scopes —
+  **not** mini-kms.) The token → mini-kms authorization step is a future seam; see DIRECTION.md's
+  "Wired vs. designed" note.
 - **Don't duplicate foundation code.** Argon2 hashing, the atomic-`0600` JSON store, base64url,
   constant-time compare, and the `ServerConfig` env/file token pattern exist in *both* shipping
   services today. They are catalogued as **`mini-common` extraction candidates** in

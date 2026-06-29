@@ -31,12 +31,14 @@ authorization model (`sub → Principal.id`, `grants.control → Principal.admin
   **shared per-plane bearer token** and two fixed principals. It does **not** parse a JWT and does
   **not** read `grants`.
 - `GrantsClaim.toAuthorization()` (`libs/mini-token/.../token/GrantsClaim.java`) — the method that
-  would bridge a token claim into the authorization model — has **no production caller.** Its only
-  caller is a test (`mini-idp` `TokenLifecycleTest`).
+  bridges a token claim into the authorization model — *does* now have a production caller, but it is
+  **mini-gateway**, not mini-kms: `BearerAuthenticator` maps a machine token's `grants` into
+  `keyGroup:OPERATION` scopes for a forward-auth `SCOPE` decision. mini-kms still does **not** call it.
 
-**Don't teach:** "a token from mini-idp authorizes a mini-kms operation." It can't today; the bridge
-exists only as a designed seam. (Stage 7's optional design exercise walks *what it would take* — and
-labels itself a design exercise.)
+**Don't teach:** "a token from mini-idp authorizes a mini-**kms** operation." It can't today; the
+mini-kms half of the bridge exists only as a designed seam (the gateway consumes `grants`, but
+mini-kms does not). (Stage 7's optional design exercise walks *what it would take* — and labels itself
+a design exercise.)
 
 ## <a id="2"></a>2. mini-kms data plane ships an allow-all policy
 

@@ -4,14 +4,16 @@
 > **mini-oidc** with a **passkey**, gets ID + access tokens, and establishes a browser **SSO session**
 > the next lab reuses.
 >
-> **Concepts:** [`oauth-and-oidc-flows.md`](../concepts/oauth-and-oidc-flows.md) +
+> **Concepts:** [`what-a-passkey-is.md`](../concepts/what-a-passkey-is.md) +
+> [`oauth-and-oidc-flows.md`](../concepts/oauth-and-oidc-flows.md) +
 > [`sessions-vs-tokens.md`](../concepts/sessions-vs-tokens.md). **Diagram:**
 > [`auth-code-pkce`](../diagrams/auth-code-pkce.md).
 >
 > **⚠ One step needs a real browser.** The passkey ceremony (WebAuthn) cannot be done with `curl` —
 > it needs a browser with a **platform authenticator or a virtual authenticator** (Chrome DevTools →
 > *WebAuthn* tab works well). Everything *around* it is shown with `curl` below; the ceremony itself
-> is a browser step. This lab is honest about that seam rather than faking an assertion.
+> is a browser step, driven by the virtual authenticator + the helper script in step 3 — so the lab is
+> still **completable end to end**. This lab is honest about the seam rather than faking an assertion.
 
 ## 1. Start mini-oidc (with a directory)
 
@@ -36,6 +38,15 @@ services/mini-oidc/build/install/mini-oidc/bin/mini-oidc \
   --directory-url http://127.0.0.1:8466 &
 
 O="http://127.0.0.1:8477"
+
+# Register a PUBLIC (PKCE-only) relying-party client and capture its id. Public means no client
+# secret — the PKCE verifier is what proves the token request came from the app that started the flow.
+REDIRECT="http://127.0.0.1:8477/"     # any registered URI; the browser lands here with ?code=…
+CLIENT_ID=$(curl -fsS -X POST "$O/admin/clients" \
+  -H "Authorization: Bearer $MINIOIDC_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"Demo App\",\"redirectUris\":[\"$REDIRECT\"],\"scopes\":[\"openid\",\"profile\",\"email\"],\"confidential\":false}" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["clientId"])')
+echo "client_id = $CLIENT_ID"
 ```
 
 > If you omit `--directory-url`, mini-oidc prints *"No --directory-url configured: using an empty
@@ -69,35 +80,53 @@ curl -fsS "$O/jwks.json"   # { "keys": [ { "kty":"OKP","crv":"Ed25519","x":"…"
 ## 3. The browser flow (with a passkey)
 
 Now the part that needs a browser. Walk the [auth-code+PKCE diagram](../diagrams/auth-code-pkce.md)
-alongside these steps.
+alongside these steps. Use **Chrome** (or any Chromium browser) for the DevTools virtual authenticator.
 
-1. **Enrol a passkey** (first time only). Open `POST /register/passkey/start` / `/finish` from a small
-   page, or use the `/docs` UI. With Chrome DevTools' *WebAuthn* tab, enable a **virtual
-   authenticator** first so you don't need real hardware.
+**First, generate the PKCE pair** (you'll need the verifier again at the token step):
+
+```bash
+VERIFIER=$(openssl rand -base64 60 | tr '+/' '-_' | tr -d '=\n')
+CHALLENGE=$(printf '%s' "$VERIFIER" | openssl dgst -binary -sha256 | base64 | tr '+/' '-_' | tr -d '=\n')
+echo "verifier saved; challenge = $CHALLENGE"
+```
+
+1. **Turn on a virtual authenticator and enrol a passkey for `alice`.** Open a mini-oidc page in
+   Chrome — `$O/docs` works — then **DevTools → ⋮ More tools → WebAuthn →** *Enable virtual
+   authenticator environment* → *Add authenticator* (the defaults are fine). The virtual authenticator
+   replaces real hardware. Now open the **Console**, paste
+   [`examples/passkey-enroll.js`](../examples/passkey-enroll.js), and run:
+   ```js
+   enrolPasskey('alice', 'Alice')   // logs: enrol alice → 201 {registered: true}
+   ```
+   The script must run **on a mini-oidc page** so the WebAuthn ceremony uses mini-oidc's origin (the
+   script's header comment explains why a standalone file would fail).
    > Enrolment here is *unauthenticated self-enrolment* — honesty seam
    > [#3](../concepts/honest-seams.md#3). A real deployment gates it.
-2. **Start the flow.** Navigate the browser to `/authorize` with a PKCE challenge. Generate a
-   verifier/challenge pair first:
+2. **Start the flow.** Build the authorize URL with your `$CLIENT_ID`, `$REDIRECT`, and `$CHALLENGE`,
+   then open it in the same browser tab:
    ```bash
-   VERIFIER=$(openssl rand -base64 60 | tr '+/' '-_' | tr -d '=\n')
-   CHALLENGE=$(printf '%s' "$VERIFIER" | openssl dgst -binary -sha256 | base64 | tr '+/' '-_' | tr -d '=\n')
-   echo "$O/authorize?client_id=<your-client>&redirect_uri=<registered>&response_type=code&scope=openid%20profile&state=xyz&nonce=n1&code_challenge=$CHALLENGE&code_challenge_method=S256"
+   echo "$O/authorize?client_id=$CLIENT_ID&redirect_uri=$REDIRECT&response_type=code&scope=openid%20profile&state=xyz&nonce=n1&code_challenge=$CHALLENGE&code_challenge_method=S256"
    ```
-   (Register a client first via `POST /admin/clients` with the admin token; see `/docs` for the body.)
-3. mini-oidc serves a **login page** (no session yet) → you complete the **passkey** ceremony
-   (`/login/passkey/start` → `/login/passkey/finish`). On success it **sets the session cookie**
-   `mioidc_session` (HttpOnly, SameSite=Lax) and redirects to `/authorize/continue`.
-4. **Consent** → `POST /authorize/decision` → you're redirected to your `redirect_uri?code=…&state=xyz`.
+3. mini-oidc serves a **login page** (no session yet). Enter `alice` and click **Sign in with
+   passkey** — the page's JS runs the assertion ceremony (`/login/passkey/start` →
+   `/login/passkey/finish`) and the **virtual authenticator answers automatically**. On success
+   mini-oidc **sets the session cookie** `mioidc_session` (HttpOnly, SameSite=Lax) and continues to
+   `/authorize/continue`.
+4. **Consent** → click **Allow** (`POST /authorize/decision`) → the browser redirects to
+   `$REDIRECT?code=…&state=xyz`. The target page may show a 404 — that's fine; **copy the `code`
+   value straight out of the address bar.**
 
 ## 4. Exchange the code (back to curl)
 
 The browser handed your app a **code**. The app redeems it on the back-channel with the **PKCE
-verifier** from step 2:
+verifier** from step 3. Paste the code from the address bar:
 
 ```bash
+CODE="<code-from-the-address-bar>"
 curl -fsS -X POST "$O/token" \
-  -d "grant_type=authorization_code&code=<code-from-redirect>&redirect_uri=<registered>&code_verifier=$VERIFIER" \
-  -u "<client_id>:<client_secret>"      # confidential client; public clients omit -u and rely on PKCE
+  -d "grant_type=authorization_code&code=$CODE&redirect_uri=$REDIRECT&client_id=$CLIENT_ID&code_verifier=$VERIFIER" \
+  | python3 -m json.tool
+# (Public/PKCE client: no -u. A confidential client would instead authenticate with -u "id:secret".)
 ```
 ```json
 { "access_token": "eyJ…", "id_token": "eyJ…", "refresh_token": "rt_…", "token_type": "Bearer",
@@ -117,10 +146,11 @@ curl -fsS -X POST "$O/token" \
 Trade the refresh token for a fresh pair, then **replay the old one** and predict what happens:
 
 ```bash
+RT_OLD="<refresh_token-from-step-4>"
 # rotate once — get a NEW refresh_token back
-curl -fsS -X POST "$O/token" -d "grant_type=refresh_token&refresh_token=<rt_old>" -u "<client_id>:<client_secret>"
+curl -fsS -X POST "$O/token" -d "grant_type=refresh_token&refresh_token=$RT_OLD&client_id=$CLIENT_ID" | python3 -m json.tool
 # now replay the SAME old token again:
-curl -s -w "\nHTTP %{http_code}\n" -X POST "$O/token" -d "grant_type=refresh_token&refresh_token=<rt_old>" -u "<client_id>:<client_secret>"
+curl -s -w "\nHTTP %{http_code}\n" -X POST "$O/token" -d "grant_type=refresh_token&refresh_token=$RT_OLD&client_id=$CLIENT_ID"
 ```
 
 **Predict:** the replay is rejected — *and* it revokes the **whole family**, so even the *new* refresh

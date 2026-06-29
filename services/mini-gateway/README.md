@@ -75,8 +75,10 @@ uses:
   `session` (a live SSO session, which carries **no scopes**). Surfaced as `X-Auth-Source`.
 - **Route rule** — one entry in `routes.json`: a `pathPrefix`, optional `methods`, an `access` mode,
   and (for `SCOPE`) a required `scope`. Rules are matched **in order**; the first match wins.
-- **Scope** — an OIDC scope string. The gateway expresses it as a mini-policy `Grant(Action.of(scope),
-  Resource.of("oidc:scope"))`, exactly as mini-oidc does, so the `SCOPE` decision uses the family's
+- **Scope** — the string a `SCOPE` route requires. For a human (mini-oidc) token it is an OIDC scope
+  (e.g. `admin`); for a machine (mini-idp) token it is a `keyGroup:OPERATION` string derived from the
+  token's `grants` claim (e.g. `billing:ENCRYPT`). Either way the gateway expresses it as a mini-policy
+  `Grant(Action.of(scope), Resource.of("oidc:scope"))`, so the `SCOPE` decision uses the family's
   shared decision function rather than an ad-hoc string check.
 
 ## Architecture
@@ -92,8 +94,14 @@ its own — it validates the family's sessions and tokens — so there is no adm
     `SessionService`. A session carries no scopes, so it satisfies `PUBLIC` / `AUTHENTICATED` routes
     but never a `SCOPE` route.
   - `BearerAuthenticator` — verifies a bearer JWS **offline** with mini-token's `JwsClaimsVerifier`
-    (signature, then `iss` / `aud` / expiry, with a 5-second leeway), then reads `sub`, the
-    space-delimited `scope` claim, and an optional `admin` flag. Any failure collapses to *empty*.
+    (signature, then `iss` / `aud` / expiry, with a 5-second leeway), then reads `sub` and the
+    caller's authority. It understands **both token dialects**: a mini-oidc (human) token carries a
+    space-delimited `scope` claim plus an optional `admin` flag, while a mini-idp (machine) token
+    carries no top-level `scope` — its authority lives in a `grants` claim. The machine token's grants
+    are mapped through mini-token's `GrantsClaim.toAuthorization()` and each operation surfaced as a
+    `keyGroup:OPERATION` scope (and `grants.control` → `admin`), so a machine token can satisfy a
+    `SCOPE` route, not only an `AUTHENTICATED` one. An unmappable `grants` claim **fails closed** (no
+    authority) and any verification failure collapses to *empty*.
   - `JwksProvider` (SPI) + `HttpJwksProvider` — fetches mini-oidc's `/jwks.json` and caches it for
     **5 minutes**, so verification stays offline between refreshes but still picks up key rotation. A
     fetch failure reuses the last good key set, else yields an empty set (which **fails closed**). The
@@ -169,9 +177,10 @@ omitted/empty means all methods. The three access modes:
 - **`PUBLIC`** — always allowed, with or without a caller.
 - **`AUTHENTICATED`** — any valid caller (an SSO session **or** a verified bearer token).
 - **`SCOPE`** — a valid caller that mini-policy says holds the named `scope`. Because a session
-  carries no scopes, a `SCOPE` route effectively requires a **bearer token** — unless the caller is an
-  `admin` principal, who is permitted everything. A `SCOPE` rule **must** name a `scope` (enforced at
-  load).
+  carries no scopes, a `SCOPE` route effectively requires a **bearer token** — a mini-oidc token whose
+  `scope` includes it, or a mini-idp token whose `grants` cover the matching `keyGroup:OPERATION` —
+  unless the caller is an `admin` principal (a mini-oidc `admin` flag or a mini-idp `grants.control`),
+  who is permitted everything. A `SCOPE` rule **must** name a `scope` (enforced at load).
 
 With **no** `--routes-file`, the default table is a single catch-all (`/` → `AUTHENTICATED`): the
 whole site is gated behind login.
