@@ -121,6 +121,11 @@ public final class M2mTokenFlow implements Exercise {
       return ExerciseResult.of(this, steps, "The token did NOT verify against the JWKS.");
     }
     final JwtClaims claims = result.claims();
+    // NOTE: the grants summary below is illustrative, not proof of authorization. It shows the
+    // authority the token CARRIES, not authority anything checked. No resource server in the family
+    // consumes these grants yet — the token -> mini-kms authorization path is designed, not wired
+    // (see docs/concepts/honest-seams.md #1). This step's real assertion is the offline signature
+    // check above, not that any grant was enforced.
     steps.add(new Step("Verify signature offline", Status.PASS,
         "sub=" + claims.subject() + ", kid=" + keyIdOf(token.accessToken())
             + ", exp=" + claims.expiresAt() + ", grants=" + grantsSummary(claims.grants())));

@@ -57,9 +57,13 @@ public record GrantsClaim(
   /**
    * Rebuild a domain {@link Authorization} from this claim, validating operation names.
    *
-   * <p>This is the step a verifier (mini-kms) performs to turn a parsed token into something it
-   * can authorize against. Unknown operation names are rejected loudly rather than silently
-   * dropped, so a typo in a grant cannot quietly widen or narrow access.
+   * <p>This is the step that turns a parsed token's {@code grants} claim into something a verifier
+   * can authorize against. Its one production caller today is <b>mini-gateway</b>
+   * ({@code BearerAuthenticator}), which maps a machine token's grants into forward-auth scopes.
+   * The designed token&nbsp;&rarr;&nbsp;<b>mini-kms</b> authorization path does <b>not</b> call it
+   * yet — that half is designed, not wired (see {@code docs/concepts/honest-seams.md} &sect;1).
+   * Unknown operation names are rejected loudly rather than silently dropped, so a typo in a grant
+   * cannot quietly widen or narrow access.
    */
   public Authorization toAuthorization() {
     final List<Grant> grants = new ArrayList<>();
