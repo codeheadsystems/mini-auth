@@ -89,7 +89,7 @@ servers — so a failure at step 1 is a dead end.
 > fix port-in-use on the standard service ports, and how to find/kill stray background servers from the
 > labs. Keep it short and task-oriented in the `howto/` voice.
 
-### 6. [ ] Localize the DEK / envelope-encryption narrative
+### 6. [x] Localize the DEK / envelope-encryption narrative
 **Why:** The central KMS concept is split across three files. `LocalKeyring.java:32-36` draws the full
 `passphrase→root→KEK→DEK→data` hierarchy, but that file never mints a DEK — `wrap()` is a comment-free
 one-liner delegating to `encrypt()`, and the DEK is actually born in `KmsService.generateDataKey`. A

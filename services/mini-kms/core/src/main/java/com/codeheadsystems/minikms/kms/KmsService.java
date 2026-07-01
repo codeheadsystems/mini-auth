@@ -14,6 +14,19 @@ import java.util.Arrays;
  * the provider always uses that group's active version and records the
  * {@link com.codeheadsystems.minikms.keyring.KekId} in each blob so decryption
  * after rotation still works.
+ *
+ * <p><b>Two ways to protect data — when to use which:</b>
+ * <ul>
+ *   <li>{@link #encrypt} seals the plaintext <em>directly</em> under the group's KEK. Simple, and
+ *       the right choice for <b>small</b> secrets (a config value, a token) — but the whole payload
+ *       has to ride through the KMS.</li>
+ *   <li>{@link #generateDataKey} is the <b>envelope pattern</b>: the KMS mints a fresh random
+ *       <b>DEK</b> (this is where a DEK is actually born — {@code LocalKeyring} only ever wraps one),
+ *       hands back the plaintext DEK <em>and</em> its wrapped form, and never sees your data. You
+ *       AES-GCM your (possibly large) payload locally under the DEK, store the wrapped DEK beside the
+ *       ciphertext, then discard the plaintext DEK. This is the {@code KEK --wrap--&gt; DEK
+ *       --encrypt--&gt; data} layer of the hierarchy diagram in {@code LocalKeyring}.</li>
+ * </ul>
  */
 public class KmsService {
 
