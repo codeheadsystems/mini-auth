@@ -157,6 +157,11 @@ public final class LocalKeyring implements MasterKeyProvider, KeyringManager {
 
   @Override
   public byte[] wrap(final String keyGroupId, final byte[] dek, final byte[] aad) {
+    // "wrap" is just encrypt() where the plaintext IS key material — the KEK --wrap--> DEK step of
+    // the hierarchy diagram above. Note the DEK is NOT born here: LocalKeyring never mints a DEK, it
+    // only seals the one it is handed under the group's active KEK. The fresh-random DEK is minted a
+    // layer up in KmsService#generateDataKey (the envelope pattern); this method is the "seal it"
+    // half. Same AES-GCM and same kek_id binding as encrypt().
     return encrypt(keyGroupId, dek, aad);
   }
 

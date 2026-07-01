@@ -7,6 +7,10 @@
 
 ## How this set relates to the other docs
 
+> **First time on this machine?** Read [`SETUP.md`](SETUP.md) before your first lab — a five-minute
+> preflight (JDK 21, the first build needs network) plus a rescue list for the usual step-1 dead ends
+> (port-in-use on 8455/8466/8477…, wrong JDK, offline build, stray background servers).
+
 You are standing in front of four kinds of document. Keep them straight and the repo opens up:
 
 | Doc | Kind | Use it to… |
