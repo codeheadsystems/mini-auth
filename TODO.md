@@ -78,7 +78,7 @@ the authorization story.
 > `M2mTokenFlow`. Verify against `docs/concepts/honest-seams.md` so the lists stay consistent. No
 > behavior change; run `./gradlew build`.
 
-### 5. [ ] Add a "Before you start / Troubleshooting" section
+### 5. [x] Add a "Before you start / Troubleshooting" section
 **Why:** Labs are billed "guaranteed to succeed," but step 1 pulls the internet and binds fixed ports
 (8455/8466/8477…). There's no rescue for port-in-use, wrong JDK, offline build, or stray background
 servers — so a failure at step 1 is a dead end.
