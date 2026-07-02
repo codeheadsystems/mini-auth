@@ -152,7 +152,7 @@ not exercises they *do* (make a choice, get feedback). The framing oversells "ex
 > supply a grant/scope and have the harness show the resulting allow vs deny decision. If you change
 > behavior, keep results secret-free and run `./gradlew build`.
 
-### 11. [ ] (Optional) Add a "Stage 0.5: the tools you'll use" primer
+### 11. [x] (Optional) Add a "Stage 0.5: the tools you'll use" primer
 **Why:** Every lab assumes curl, env vars, background jobs, and jq/python. Lowers the on-ramp for the
 bottom edge of the stated audience.
 
