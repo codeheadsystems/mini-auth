@@ -1,5 +1,10 @@
 # Mini IDP
 
+> 🎓 **Learning?** This is stage 3 of the course — read
+> [`oauth-and-oidc-flows`](../../docs/concepts/oauth-and-oidc-flows.md) then run lab
+> [`03-machine-identity-end-to-end`](../../docs/tutorials/03-machine-identity-end-to-end.md). Full
+> syllabus: [docs/TEACHING.md](../../docs/TEACHING.md).
+
 **mini-idp** is a small, standalone, single-machine **identity provider**. It registers clients,
 issues short-lived [Ed25519](https://ed25519.cr.yp.to/)-signed JWT access tokens via the OAuth 2.0
 **client-credentials** grant, and publishes its public signing keys as a **JWKS** so any verifier

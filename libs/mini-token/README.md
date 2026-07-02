@@ -1,5 +1,10 @@
 # mini-token
 
+> 🎓 **Learning?** This is stage 2's keystone — read
+> [`what-a-token-is`](../../docs/concepts/what-a-token-is.md) then run lab
+> [`02-build-and-verify-a-token-by-hand`](../../docs/tutorials/02-build-and-verify-a-token-by-hand.md).
+> Full syllabus: [docs/TEACHING.md](../../docs/TEACHING.md).
+
 The family's shared **token plane**: the Ed25519-signed JWS/JWT machinery, the JWKS model, the
 signing-key lifecycle (rotation), the revocation denylist, the audit log, the published `grants`
 claim contract, a small persistence SPI, **and** the shared browser-SSO session store. It was

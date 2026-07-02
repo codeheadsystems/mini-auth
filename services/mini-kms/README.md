@@ -1,5 +1,10 @@
 # Mini KMS
 
+> 🎓 **Learning?** This is stage 6's capstone — read
+> [`envelope-encryption-and-kms`](../../docs/concepts/envelope-encryption-and-kms.md) then run lab
+> [`06-protect-the-signing-keys`](../../docs/tutorials/06-protect-the-signing-keys.md). Full
+> syllabus: [docs/TEACHING.md](../../docs/TEACHING.md).
+
 A small, single-machine **Key Management Service** in Java that provides
 **envelope encryption** with **rotatable keys** to local services over sockets.
 

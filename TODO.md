@@ -119,7 +119,7 @@ mistake.
 > for the syllabus, and fix any links that referenced it. Tighten the framing so `LEARNING.md` reads as
 > "once you've done the course, re-walk the source," not a competing start point.
 
-### 8. [ ] Add a "Learning?" banner to each service README + render diagrams for editor readers
+### 8. [x] Add a "Learning?" banner to each service README + render diagrams for editor readers
 **Why:** Per-service READMEs are reference docs with no pointer back into the curriculum, and the one
 visual layer (mermaid) degrades to raw source for the code-first reader working in an editor.
 

@@ -1,5 +1,10 @@
 # Mini Gateway
 
+> 🎓 **Learning?** This is stage 5 of the course — read
+> [`sessions-vs-tokens`](../../docs/concepts/sessions-vs-tokens.md) then run lab
+> [`05-gate-a-no-auth-app`](../../docs/tutorials/05-gate-a-no-auth-app.md). Full syllabus:
+> [docs/TEACHING.md](../../docs/TEACHING.md).
+
 **mini-gateway** is the **forward-auth endpoint** for a reverse proxy. A proxy (Traefik
 ForwardAuth, Caddy `forward_auth`, nginx `auth_request`) calls it *before* forwarding each request;
 mini-gateway validates the caller, evaluates the target route, and answers **allow / deny / log-in**.

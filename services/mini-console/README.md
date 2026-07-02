@@ -1,5 +1,9 @@
 # mini-console
 
+> 🎓 **Learning?** This ties the whole course together rather than teaching one concept — after
+> finishing the stage ladder in [docs/TEACHING.md](../../docs/TEACHING.md), run the harness's
+> `FullChainFlow` here to watch `identity → token → gateway verifies → resource` happen in one place.
+
 **mini-console** is the optional unified **admin console** over the whole `mini-` family — one
 loopback place to browse mini-directory identities, rotate signing keys, manage mini-kms key groups,
 read audit/issuance logs, register OIDC clients, and **smoke-test the family end to end** — instead

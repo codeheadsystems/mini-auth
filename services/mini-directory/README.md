@@ -1,5 +1,10 @@
 # mini-directory
 
+> 🎓 **Learning?** This is stage 1 of the course — read
+> [`authorization-model`](../../docs/concepts/authorization-model.md) then run lab
+> [`01-resolve-a-principal`](../../docs/tutorials/01-resolve-a-principal.md). Full syllabus:
+> [docs/TEACHING.md](../../docs/TEACHING.md).
+
 **mini-directory** is the single **identity source of truth** for the mini- family. It owns
 **humans**, **service accounts**, **groups**, and **roles**, plus the grant mappings between them —
 and its defining job is **resolution**: turning any stored account into a

@@ -4,8 +4,10 @@
 > depends on whom). These are the **sequence** diagrams — *what happens, in what order*, for the
 > flows the course teaches. The concept and tutorial docs embed them.
 
-Each diagram is mermaid (GitHub renders it inline). They show the **wired** runtime paths; where a
-step is a designed-but-not-wired seam, the diagram says so and links
+Each diagram is mermaid (GitHub renders it inline). **Reading source in an editor instead?** Every
+diagram file has a one-line note above its code block pointing you to
+<https://mermaid.live> — paste the block in to render it. They show the **wired** runtime paths;
+where a step is a designed-but-not-wired seam, the diagram says so and links
 [`concepts/honest-seams.md`](../concepts/honest-seams.md).
 
 | Diagram | Flow | Used by |

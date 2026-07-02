@@ -1,5 +1,11 @@
 # Mini OIDC
 
+> 🎓 **Learning?** This is stage 4 of the course — read
+> [`oauth-and-oidc-flows`](../../docs/concepts/oauth-and-oidc-flows.md) and
+> [`what-a-passkey-is`](../../docs/concepts/what-a-passkey-is.md), then run lab
+> [`04-human-sso-end-to-end`](../../docs/tutorials/04-human-sso-end-to-end.md). Full syllabus:
+> [docs/TEACHING.md](../../docs/TEACHING.md).
+
 **mini-oidc** is the **human SSO / OpenID Provider** for the mini- family. It runs the OAuth 2.0
 **authorization-code flow with [PKCE](https://datatracker.ietf.org/doc/html/rfc7636)**, authenticates
 people with **passkeys** ([WebAuthn](https://www.w3.org/TR/webauthn-2/)), and issues **ID + access

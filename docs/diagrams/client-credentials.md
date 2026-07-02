@@ -5,6 +5,8 @@
 > [`what-a-token-is.md`](../concepts/what-a-token-is.md) + [`oauth-and-oidc-flows.md`](../concepts/oauth-and-oidc-flows.md).
 > Lab: [`02`](../tutorials/02-build-and-verify-a-token-by-hand.md) / [`03`](../tutorials/03-machine-identity-end-to-end.md).
 
+> **Reading this in an editor, not GitHub?** Paste the block below into <https://mermaid.live> to render it.
+
 ```mermaid
 sequenceDiagram
     autonumber
