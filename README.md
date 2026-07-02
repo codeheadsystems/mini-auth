@@ -13,6 +13,11 @@ mini-auth is two things:
    of the family: the vision, the catalog, the architecture, the recursive integrations, the open
    design questions, and the roadmap — the full architecture reference.
 
+> **Which doc do I want?** Two doors, pick one: **[docs/TEACHING.md](docs/TEACHING.md)** to *learn*
+> (concepts → labs → security, in teaching order), or **[docs/DIRECTION.md](docs/DIRECTION.md)** to
+> *understand the architecture* (vision, catalog, runtime map). Everything else — `GLOSSARY.md`,
+> `LEARNING.md`, per-service `README.md`s — is reference the two doors link you to when you need it.
+
 > 🎓 **New here? Start with [docs/TEACHING.md](docs/TEACHING.md).** It's a course-style track
 > (concepts → hands-on labs → security) that teaches authentication & authorization using the family
 > as the worked example, and it routes you to the right next step in one screen.

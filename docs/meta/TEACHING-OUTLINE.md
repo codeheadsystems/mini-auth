@@ -3,10 +3,12 @@
 > **What this file is.** The original *blueprint* for the course-style documentation set under
 > `docs/` that teaches **how authentication and authorization work in practice**, using the `mini-*`
 > services as the worked example. It is kept as a design/history record of how the set was planned.
+> It lives under `docs/meta/` (contributor/design history), not `docs/`, so it can't be mistaken for
+> the live syllabus.
 >
 > **Status:** ✅ realized. The set this file planned now exists — see the concepts, tutorials, howtos,
 > diagrams, and security track under `docs/`. **If you're here to learn, don't start here:** the live
-> syllabus is [`TEACHING.md`](TEACHING.md). This outline is for contributors curious about the design.
+> syllabus is [`TEACHING.md`](../TEACHING.md). This outline is for contributors curious about the design.
 
 ---
 
@@ -17,9 +19,9 @@ The repo already ships three excellent **orientation** docs and a reference laye
 
 | Existing doc | What it is | Role in the new set |
 | --- | --- | --- |
-| [`DIRECTION.md`](DIRECTION.md) | The **map** — vision, component catalog, runtime relationships, roadmap, the "wired vs. designed" note. | The authoritative *why/architecture*. Concept docs **hand off** to it; never restate it. |
-| [`GLOSSARY.md`](GLOSSARY.md) | The **dictionary** — every term, defined once. | New docs **link** terms here on first use and never redefine. Missing a term? Add it *here*. |
-| [`LEARNING.md`](LEARNING.md) | The **reading order** — the source files in dependency-DAG order. | Complementary: tutorials teach the *concepts in teaching order*, then LEARNING.md walks the *code*. Cross-link both ways. |
+| [`DIRECTION.md`](../DIRECTION.md) | The **map** — vision, component catalog, runtime relationships, roadmap, the "wired vs. designed" note. | The authoritative *why/architecture*. Concept docs **hand off** to it; never restate it. |
+| [`GLOSSARY.md`](../GLOSSARY.md) | The **dictionary** — every term, defined once. | New docs **link** terms here on first use and never redefine. Missing a term? Add it *here*. |
+| [`LEARNING.md`](../LEARNING.md) | The **reading order** — the source files in dependency-DAG order. | Complementary: tutorials teach the *concepts in teaching order*, then LEARNING.md walks the *code*. Cross-link both ways. |
 | Service `README.md` + OpenAPI | **Reference** — authoritative endpoints, flags, contracts. | Labs/how-tos link out for exact syntax (which drifts); never copy command tables. |
 | `services/*/docs/security/*.md` | **Threat-model findings** — issue → fix → why → tests. | Pre-built case studies; the new security track *frames and sequences* them. |
 
@@ -55,7 +57,7 @@ docs/
   howto/                 # HOW-TO — task-oriented, for someone who already gets it
   security/              # ATTACK & DEFENSE — framings over services/*/docs/security
   diagrams/              # shared sequence/flow diagrams (mermaid), referenced by the above
-  (existing) DIRECTION.md  GLOSSARY.md  LEARNING.md  TEACHING-OUTLINE.md
+  (existing) DIRECTION.md  GLOSSARY.md  LEARNING.md  meta/TEACHING-OUTLINE.md
 ```
 
 `TEACHING.md` is the new entry point; the root `README.md` gains a link to it.

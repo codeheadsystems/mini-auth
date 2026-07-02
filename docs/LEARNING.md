@@ -5,10 +5,11 @@ each other, so reading them in directory order (or alphabetically) drops you int
 deep end. This is the order that builds the concepts up before they're used — it follows
 the family's actual dependency DAG, smallest and most-foundational first.
 
-> **Concepts-first vs. code-first.** This is the *code-first* path — it walks the source in
-> dependency order. If you'd rather build the *ideas* first (with hands-on labs and a security
-> track), start at [`TEACHING.md`](TEACHING.md) and come here when you want to read the
-> implementation. The two are designed to cross-link: each teaching stage points at the files below.
+> **Not a competing start point.** If you haven't done the course yet, start at
+> [`TEACHING.md`](TEACHING.md) — it builds the *ideas* first, with hands-on labs and a security
+> track. Come here once you've done that, to re-walk the same territory as *source*, in dependency
+> order instead of teaching order. The two are designed to cross-link: each teaching stage points at
+> the files below.
 
 **How to use this.** At each stop, read the named files (and run the quick-start where
 there is one), then move on. Each stop lists the *concept you learn there* — that's the

@@ -107,7 +107,7 @@ student reading the keyring can't see the layer the diagram promises.
 
 ## P3
 
-### 7. [ ] Reduce doc entry-point overload
+### 7. [x] Reduce doc entry-point overload
 **Why:** A newcomer landing in `docs/` faces ~8 index-like files; `TEACHING-OUTLINE.md` (a
 design-history doc) sits next to the live syllabus with a near-identical name and will be opened by
 mistake.
