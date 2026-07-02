@@ -63,6 +63,17 @@ service the operator did not wire reads "not configured" — never a fabricated 
 
 ## Exercise harness (what "pass" means)
 
+**Read this framing honestly: most of these flows are watch-it-work integration smoke tests, not
+exercises where you make a choice.** You click Run, the flow drives real requests against the wired
+services, and you watch pass/fail/skip come back with the cryptographic reasoning shown per step —
+valuable as a demonstration, but you aren't predicting anything or being asked to choose.
+
+**The one flow that is genuinely interactive is Gateway forward-auth.** You supply the path, an
+access token, and (optionally) a path outside that token's scope — three inputs *you* choose — and
+the harness reports the family's actual allow/deny/forbid decision for exactly the case you built.
+Do the tutorials' **predict-then-run** thing here: write down what you expect (allowed? forbidden?
+redirected to login?) *before* you click Run, the same discipline the labs use.
+
 Each flow returns a result whose **steps are secret-free by contract** (tokens/secrets become
 `«redacted»`; only non-secret facts — a kid, sub, exp, serial, status — are shown). "Pass" is a
 cryptographic/state assertion verified **offline**, not just an HTTP 200. A flow honestly reports

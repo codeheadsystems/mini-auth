@@ -292,6 +292,12 @@ All POST routes carry a hidden `_csrf` field; the handler rejects a missing/mism
 
 ## 5. Exercise / test harness (test mode)
 
+**Framing, honestly.** Most of these flows are integration smoke tests a learner *watches* run —
+click Run, observe pass/fail/skip — not exercises where a learner makes a choice. The one exception
+is `GatewayVerifyFlow`: the operator supplies the path, an access token, and (optionally) a
+scope-excluded path, so it's a genuine predict-then-observe device (see the README's harness
+section). Don't oversell the rest as "exercises" in the pedagogical sense.
+
 The harness is an **I/O-free engine** (`harness/`) given the wired clients; each flow returns an `ExerciseResult(name, Status, steps, redactedDetail)`. **"Pass" is defined per flow as a cryptographic/state assertion verified offline**, not just an HTTP 200. Results render as green/red rows with per-step detail; **no step ever records a secret** — tokens/secrets are replaced with `«redacted»` and only non-secret facts (kid, sub, exp, serial, status code) are shown.
 
 | Flow | Drives | "Pass" = (verified offline) |

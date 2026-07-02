@@ -141,7 +141,7 @@ code-tour capstone).
 > with a "Now read it" box into mini-ca's `ca/` package. Add it to the stage ladder in
 > `docs/TEACHING.md` so the mini-ca capstone has a concept stage behind it.
 
-### 10. [ ] Reframe or upgrade the mini-console "exercise harness"
+### 10. [x] Reframe or upgrade the mini-console "exercise harness"
 **Why:** All reviewers flagged that the harness flows are integration smoke-tests a learner *watches*,
 not exercises they *do* (make a choice, get feedback). The framing oversells "exercise."
 

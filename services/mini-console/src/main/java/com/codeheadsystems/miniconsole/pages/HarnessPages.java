@@ -206,6 +206,9 @@ public final class HarnessPages {
    */
   private static String gatewayRunForm(final String exerciseId, final String csrf) {
     return """
+        <p class="muted"><strong>This one's interactive, not a canned demo:</strong> the path/token/
+        scope-path below are yours to choose. Predict allow, forbid, or redirect-to-login for each
+        branch <em>before</em> you click Run — the same predict-then-run discipline the tutorials use.</p>
         <form method="post" action="/harness/$ID/run" style="margin-top:.5rem">
           <input type="hidden" name="csrf" value="$CSRF">
           <p><label>Gated path<br><input type="text" name="path" value="/" autocomplete="off"></label></p>
