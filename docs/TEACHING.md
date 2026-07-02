@@ -64,6 +64,7 @@ proves it. Do them in order and each one earns the next. (This is a different or
 | **4** | Run a human SSO login: PKCE, passkeys, sessions, refresh | [`sessions-vs-tokens`](concepts/sessions-vs-tokens.md) | [`04-human-sso-end-to-end`](tutorials/04-human-sso-end-to-end.md) |
 | **5** | Gate a no-auth app via forward-auth | *(reuse stage 4)* | [`05-gate-a-no-auth-app`](tutorials/05-gate-a-no-auth-app.md) |
 | **6** | Explain how the family protects its own keys | [`envelope-encryption-and-kms`](concepts/envelope-encryption-and-kms.md) | [`06-protect-the-signing-keys`](tutorials/06-protect-the-signing-keys.md) |
+| **7** | Explain mTLS and chain-to-root validation for workload identity | [`certificates-and-mtls`](concepts/certificates-and-mtls.md) | *(no lab yet — a code-tour capstone over `mini-ca`)* |
 | **∥** | Carry the family's security reflexes anywhere | [`secure-design-invariants`](concepts/secure-design-invariants.md) | the [`security/`](security/) threat labs |
 
 **The keystone is stage 2.** Building and verifying a token signature by hand — then tampering one

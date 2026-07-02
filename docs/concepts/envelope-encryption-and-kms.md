@@ -115,4 +115,6 @@ the family eating its own dog food — and the capstone that ties envelope encry
   the `kms1:` envelope, `rewrap` for rotation).
 
 Lab: [`06-protect-the-signing-keys.md`](../tutorials/06-protect-the-signing-keys.md) — start mini-kms,
-run an issuer with `--kms-*`, and confirm only ciphertext touches disk.
+run an issuer with `--kms-*`, and confirm only ciphertext touches disk. Then continue to stage 7,
+[`certificates-and-mtls.md`](certificates-and-mtls.md) — the CA private key you just saw wrapped is
+itself a `SigningKeys` document, reusing this exact integration.

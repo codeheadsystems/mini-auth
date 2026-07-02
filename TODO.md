@@ -130,7 +130,7 @@ visual layer (mermaid) degrades to raw source for the code-first reader working 
 > pre-rendered SVG/PNG alongside each `.md`, or add one line per diagram telling editor readers how to
 > view it (e.g. paste into mermaid.live).
 
-### 9. [ ] Add an mTLS / workload-identity concept-stage doc
+### 9. [x] Add an mTLS / workload-identity concept-stage doc
 **Why:** mini-ca ships and the glossary defines CSR/PoP/SAN/EKU, but there's no concept doc on *why*
 mTLS / how chain-to-root validation works, and mini-ca is absent from the stage ladder (only a
 code-tour capstone).
