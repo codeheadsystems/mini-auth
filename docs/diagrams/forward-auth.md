@@ -5,6 +5,8 @@
 > [`authn-vs-authz.md`](../concepts/authn-vs-authz.md) (authZ at the edge). Lab:
 > [`05`](../tutorials/05-gate-a-no-auth-app.md).
 
+> **Reading this in an editor, not GitHub?** Paste the block below into <https://mermaid.live> to render it.
+
 ```mermaid
 sequenceDiagram
     autonumber

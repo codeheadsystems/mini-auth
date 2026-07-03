@@ -1,5 +1,10 @@
 # mini-ca
 
+> 🎓 **Learning?** Read [`certificates-and-mtls`](../../docs/concepts/certificates-and-mtls.md) for
+> why mTLS and how chain-to-root validation works, then browse the `ca/` package below (this
+> capstone has no lab yet — it's a code-tour). Full syllabus:
+> [docs/TEACHING.md](../../docs/TEACHING.md).
+
 A small **internal certificate authority** for the homelab. It issues and renews **short-lived**
 X.509 leaf certificates — for mTLS between the minis and for homelab services — from PKCS#10 CSRs,
 keeps an issuance log and a revocation list, and protects its own CA private key by **wrapping it

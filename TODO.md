@@ -107,7 +107,7 @@ student reading the keyring can't see the layer the diagram promises.
 
 ## P3
 
-### 7. [ ] Reduce doc entry-point overload
+### 7. [x] Reduce doc entry-point overload
 **Why:** A newcomer landing in `docs/` faces ~8 index-like files; `TEACHING-OUTLINE.md` (a
 design-history doc) sits next to the live syllabus with a near-identical name and will be opened by
 mistake.
@@ -119,7 +119,7 @@ mistake.
 > for the syllabus, and fix any links that referenced it. Tighten the framing so `LEARNING.md` reads as
 > "once you've done the course, re-walk the source," not a competing start point.
 
-### 8. [ ] Add a "Learning?" banner to each service README + render diagrams for editor readers
+### 8. [x] Add a "Learning?" banner to each service README + render diagrams for editor readers
 **Why:** Per-service READMEs are reference docs with no pointer back into the curriculum, and the one
 visual layer (mermaid) degrades to raw source for the code-first reader working in an editor.
 
@@ -130,7 +130,7 @@ visual layer (mermaid) degrades to raw source for the code-first reader working 
 > pre-rendered SVG/PNG alongside each `.md`, or add one line per diagram telling editor readers how to
 > view it (e.g. paste into mermaid.live).
 
-### 9. [ ] Add an mTLS / workload-identity concept-stage doc
+### 9. [x] Add an mTLS / workload-identity concept-stage doc
 **Why:** mini-ca ships and the glossary defines CSR/PoP/SAN/EKU, but there's no concept doc on *why*
 mTLS / how chain-to-root validation works, and mini-ca is absent from the stage ladder (only a
 code-tour capstone).
@@ -141,7 +141,7 @@ code-tour capstone).
 > with a "Now read it" box into mini-ca's `ca/` package. Add it to the stage ladder in
 > `docs/TEACHING.md` so the mini-ca capstone has a concept stage behind it.
 
-### 10. [ ] Reframe or upgrade the mini-console "exercise harness"
+### 10. [x] Reframe or upgrade the mini-console "exercise harness"
 **Why:** All reviewers flagged that the harness flows are integration smoke-tests a learner *watches*,
 not exercises they *do* (make a choice, get feedback). The framing oversells "exercise."
 
@@ -152,7 +152,7 @@ not exercises they *do* (make a choice, get feedback). The framing oversells "ex
 > supply a grant/scope and have the harness show the resulting allow vs deny decision. If you change
 > behavior, keep results secret-free and run `./gradlew build`.
 
-### 11. [ ] (Optional) Add a "Stage 0.5: the tools you'll use" primer
+### 11. [x] (Optional) Add a "Stage 0.5: the tools you'll use" primer
 **Why:** Every lab assumes curl, env vars, background jobs, and jq/python. Lowers the on-ramp for the
 bottom edge of the stated audience.
 

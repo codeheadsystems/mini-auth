@@ -5,6 +5,8 @@
 > [`envelope-encryption-and-kms.md`](../concepts/envelope-encryption-and-kms.md). Lab:
 > [`06`](../tutorials/06-protect-the-signing-keys.md).
 
+> **Reading this in an editor, not GitHub?** Paste the block below into <https://mermaid.live> to render it.
+
 ```mermaid
 sequenceDiagram
     autonumber

@@ -10,6 +10,10 @@
 > **First time on this machine?** Read [`SETUP.md`](SETUP.md) before your first lab — a five-minute
 > preflight (JDK 21, the first build needs network) plus a rescue list for the usual step-1 dead ends
 > (port-in-use on 8455/8466/8477…, wrong JDK, offline build, stray background servers).
+>
+> **New to the command line?** [`tutorials/00-tools-you-will-use.md`](tutorials/00-tools-you-will-use.md)
+> is an optional primer on `curl`, exporting env vars, backgrounding/killing a server, and decoding a
+> JWT with `jq` or `python3` — skip it if all of that is already muscle memory.
 
 You are standing in front of four kinds of document. Keep them straight and the repo opens up:
 
@@ -57,6 +61,7 @@ proves it. Do them in order and each one earns the next. (This is a different or
 | Stage | You'll be able to… | Concept | Lab |
 | --- | --- | --- | --- |
 | **0** | Name which problem each `mini-` service solves | [`authn-vs-authz`](concepts/authn-vs-authz.md) | — |
+| **0.5** *(optional)* | Use `curl`, env vars, background jobs, and `jq`/`python3` comfortably | — | [`00-tools-you-will-use`](tutorials/00-tools-you-will-use.md) |
 | **1** | See a decision as a pure function; explain deny-by-default | [`authorization-model`](concepts/authorization-model.md) | [`01-resolve-a-principal`](tutorials/01-resolve-a-principal.md) |
 | **2** | Say what a signed token *is* and verify one offline, by hand | [`what-a-token-is`](concepts/what-a-token-is.md) | [`02-build-and-verify-a-token-by-hand`](tutorials/02-build-and-verify-a-token-by-hand.md) ← **keystone** |
 | **3** | Trace a machine identity end to end | [`oauth-and-oidc-flows`](concepts/oauth-and-oidc-flows.md) | [`03-machine-identity-end-to-end`](tutorials/03-machine-identity-end-to-end.md) |
@@ -64,6 +69,7 @@ proves it. Do them in order and each one earns the next. (This is a different or
 | **4** | Run a human SSO login: PKCE, passkeys, sessions, refresh | [`sessions-vs-tokens`](concepts/sessions-vs-tokens.md) | [`04-human-sso-end-to-end`](tutorials/04-human-sso-end-to-end.md) |
 | **5** | Gate a no-auth app via forward-auth | *(reuse stage 4)* | [`05-gate-a-no-auth-app`](tutorials/05-gate-a-no-auth-app.md) |
 | **6** | Explain how the family protects its own keys | [`envelope-encryption-and-kms`](concepts/envelope-encryption-and-kms.md) | [`06-protect-the-signing-keys`](tutorials/06-protect-the-signing-keys.md) |
+| **7** | Explain mTLS and chain-to-root validation for workload identity | [`certificates-and-mtls`](concepts/certificates-and-mtls.md) | *(no lab yet — a code-tour capstone over `mini-ca`)* |
 | **∥** | Carry the family's security reflexes anywhere | [`secure-design-invariants`](concepts/secure-design-invariants.md) | the [`security/`](security/) threat labs |
 
 **The keystone is stage 2.** Building and verifying a token signature by hand — then tampering one

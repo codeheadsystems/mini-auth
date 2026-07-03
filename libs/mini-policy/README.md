@@ -1,5 +1,10 @@
 # mini-policy
 
+> 🎓 **Learning?** This is stage 1 of the course — read
+> [`authorization-model`](../../docs/concepts/authorization-model.md) then run lab
+> [`01-resolve-a-principal`](../../docs/tutorials/01-resolve-a-principal.md). Full syllabus:
+> [docs/TEACHING.md](../../docs/TEACHING.md).
+
 The family's **authorization decision function** — one tiny, dependency-free library that answers a
 single question for every service: *may **this** principal perform **this** action on **this**
 resource?* It is the shared replacement for the per-service authorization checks the family used to

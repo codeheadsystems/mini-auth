@@ -6,6 +6,8 @@
 > [`sessions-vs-tokens.md`](../concepts/sessions-vs-tokens.md). Lab:
 > [`04`](../tutorials/04-human-sso-end-to-end.md).
 
+> **Reading this in an editor, not GitHub?** Paste the block below into <https://mermaid.live> to render it.
+
 ```mermaid
 sequenceDiagram
     autonumber
