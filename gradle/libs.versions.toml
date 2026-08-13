@@ -9,7 +9,7 @@
 [versions]
 jackson = "3.2.1"
 bouncycastle = "1.85"
-junit-jupiter = "6.1.2"
+junit-jupiter = "6.1.3"
 # pk-auth: the passkeys-first auth library set, consumed from Maven Central (NOT vendored).
 # mini-oidc depends on pk-auth-core for the passkey credential layer.
 pk-auth = "2.2.0"
