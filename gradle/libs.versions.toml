@@ -7,7 +7,7 @@
 # on `com.fasterxml.jackson.core` (pulled in transitively by databind).
 
 [versions]
-jackson = "3.2.1"
+jackson = "3.2.2"
 bouncycastle = "1.85"
 junit-jupiter = "6.1.3"
 # pk-auth: the passkeys-first auth library set, consumed from Maven Central (NOT vendored).
