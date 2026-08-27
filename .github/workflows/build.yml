@@ -31,7 +31,7 @@ jobs:
       # Pin the toolchain to JDK 21 (matches the Gradle toolchain the convention plugins request,
       # so no foojay auto-download is needed in CI).
       - name: Set up JDK 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
