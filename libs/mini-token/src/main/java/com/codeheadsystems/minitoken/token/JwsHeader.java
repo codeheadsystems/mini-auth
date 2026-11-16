@@ -1,5 +1,6 @@
 package com.codeheadsystems.minitoken.token;
 
+import com.codeheadsystems.minitoken.crypto.SigningAlgorithm;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -8,7 +9,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *
  * <p>Three fields:
  * <ul>
- *   <li>{@code alg} — always {@code "EdDSA"} (RFC 8037), the JOSE name for Ed25519 signatures.</li>
+ *   <li>{@code alg} — {@code "EdDSA"} (RFC 8037, Ed25519) by default; {@code "ES256"} (RFC 7518,
+ *       ECDSA P-256) when an issuer signs with an ES256 key (see {@link SigningAlgorithm}).</li>
  *   <li>{@code typ} — always {@code "JWT"}.</li>
  *   <li>{@code kid} — the id of the signing key, so a verifier can pick the matching JWK during
  *       rotation. This is the only field that varies per key.</li>
@@ -24,11 +26,16 @@ public record JwsHeader(
     @JsonProperty("typ") String type,
     @JsonProperty("kid") String keyId) {
 
-  /** The only signature algorithm mini-idp uses. */
+  /** The family's default signature algorithm (and the only one mini-token's verifiers accept). */
   public static final String ALG_EDDSA = "EdDSA";
 
-  /** Build the standard JWT header for the given signing-key id. */
+  /** Build the standard EdDSA JWT header for the given signing-key id. */
   public static JwsHeader forKid(final String kid) {
     return new JwsHeader(ALG_EDDSA, "JWT", kid);
+  }
+
+  /** Build the standard JWT header for a key of the given algorithm. */
+  public static JwsHeader forKid(final SigningAlgorithm algorithm, final String kid) {
+    return new JwsHeader(algorithm.jwsName(), "JWT", kid);
   }
 }

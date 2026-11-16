@@ -1,8 +1,10 @@
 package com.codeheadsystems.miniidp.server;
 
+import com.codeheadsystems.minitoken.crypto.SigningAlgorithm;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -19,8 +21,12 @@ import java.util.Map;
  * <pre>
  *   --host H                  MINIIDP_HOST                 loopback bind host (default 127.0.0.1)
  *   --port N                  MINIIDP_PORT                 TCP port (default 8455)
- *   --issuer URL              MINIIDP_ISSUER               issuer URL (default http://&lt;host&gt;:&lt;port&gt;)
- *   --audience AUD            MINIIDP_AUDIENCE             token audience (default mini-kms)
+ *   --issuer URL              MINIIDP_ISSUER               issuer URL (default http://&lt;host&gt;:&lt;port&gt;,
+ *                                                          using the bound port when --port is 0)
+ *   --audience AUD            MINIIDP_AUDIENCE             default token audience (default mini-kms)
+ *   --audience-algorithm A=ALG MINIIDP_AUDIENCE_ALGORITHMS sign tokens for audience A with ALG
+ *                                                          (EdDSA|ES256); repeatable flag, or a
+ *                                                          comma-separated env list. Default EdDSA.
  *   --token-ttl-seconds N     MINIIDP_TOKEN_TTL_SECONDS    access-token lifetime (default 300)
  *   --data-dir PATH           MINIIDP_DATA_DIR             directory for the JSON stores
  *   --admin-token-file PATH   MINIIDP_ADMIN_TOKEN_FILE     file holding mini-idp's admin token
@@ -28,6 +34,9 @@ import java.util.Map;
  *   --directory-url URL       MINIIDP_DIRECTORY_URL        mini-directory base URL (service-account source)
  *   --directory-token-file P  MINIIDP_DIRECTORY_TOKEN_FILE mini-directory admin token file
  *                                                          (alt: MINIIDP_DIRECTORY_TOKEN env)
+ *   --service-accounts-file P MINIIDP_SERVICE_ACCOUNTS_FILE seed an in-memory directory instead of
+ *                                                          mini-directory (alt: MINIIDP_SERVICE_ACCOUNTS
+ *                                                          env, inline JSON); see SeededServiceAccounts
  *   --kms-tcp HOST:PORT       MINIIDP_KMS_TCP              wrap signing keys under mini-kms (optional)
  *   --kms-key-group NAME      MINIIDP_KMS_KEY_GROUP        the mini-kms key group
  *   --kms-api-token-file PATH MINIIDP_KMS_API_TOKEN_FILE   mini-kms data-plane token file
@@ -51,7 +60,9 @@ public final class ServerConfig {
   private final String host;
   private final int port;
   private final String issuer;
+  private final boolean issuerExplicit;
   private final String audience;
+  private final Map<String, SigningAlgorithm> audienceAlgorithms;
   private final Duration tokenTtl;
   private final Path dataDir;
   private final Path adminTokenFilePath;
@@ -61,15 +72,20 @@ public final class ServerConfig {
   private final int kmsPort;
   private final String kmsKeyGroup;
   private final Path kmsApiTokenFilePath;
+  private final Path serviceAccountsFilePath;
 
-  ServerConfig(final String host, final int port, final String issuer, final String audience,
+  ServerConfig(final String host, final int port, final String issuer, final boolean issuerExplicit,
+               final String audience, final Map<String, SigningAlgorithm> audienceAlgorithms,
                final Duration tokenTtl, final Path dataDir, final Path adminTokenFilePath,
                final String directoryUrl, final Path directoryTokenFilePath, final String kmsHost,
-               final int kmsPort, final String kmsKeyGroup, final Path kmsApiTokenFilePath) {
+               final int kmsPort, final String kmsKeyGroup, final Path kmsApiTokenFilePath,
+               final Path serviceAccountsFilePath) {
     this.host = host;
     this.port = port;
     this.issuer = issuer;
+    this.issuerExplicit = issuerExplicit;
     this.audience = audience;
+    this.audienceAlgorithms = Map.copyOf(audienceAlgorithms);
     this.tokenTtl = tokenTtl;
     this.dataDir = dataDir;
     this.adminTokenFilePath = adminTokenFilePath;
@@ -79,6 +95,7 @@ public final class ServerConfig {
     this.kmsPort = kmsPort;
     this.kmsKeyGroup = kmsKeyGroup;
     this.kmsApiTokenFilePath = kmsApiTokenFilePath;
+    this.serviceAccountsFilePath = serviceAccountsFilePath;
   }
 
   /**
@@ -101,6 +118,16 @@ public final class ServerConfig {
     String kmsTcp = env.get("MINIIDP_KMS_TCP");
     String kmsKeyGroup = env.get("MINIIDP_KMS_KEY_GROUP");
     String kmsApiTokenFile = env.get("MINIIDP_KMS_API_TOKEN_FILE");
+    String serviceAccountsFile = env.get("MINIIDP_SERVICE_ACCOUNTS_FILE");
+    final Map<String, SigningAlgorithm> audienceAlgorithms = new LinkedHashMap<>();
+    final String envAlgorithms = env.get("MINIIDP_AUDIENCE_ALGORITHMS");
+    if (envAlgorithms != null && !envAlgorithms.isBlank()) {
+      for (final String mapping : envAlgorithms.split(",")) {
+        if (!mapping.isBlank()) {
+          putAudienceAlgorithm(audienceAlgorithms, mapping);
+        }
+      }
+    }
 
     for (int i = 0; i < args.length; i++) {
       final String arg = args[i];
@@ -109,6 +136,9 @@ public final class ServerConfig {
         case "--port" -> port = Integer.parseInt(requireValue(args, ++i, arg));
         case "--issuer" -> issuer = requireValue(args, ++i, arg);
         case "--audience" -> audience = requireValue(args, ++i, arg);
+        case "--audience-algorithm" ->
+            putAudienceAlgorithm(audienceAlgorithms, requireValue(args, ++i, arg));
+        case "--service-accounts-file" -> serviceAccountsFile = requireValue(args, ++i, arg);
         case "--token-ttl-seconds" -> ttlSeconds = Integer.parseInt(requireValue(args, ++i, arg));
         case "--data-dir" -> dataDir = requireValue(args, ++i, arg);
         case "--admin-token-file" -> adminTokenFile = requireValue(args, ++i, arg);
@@ -133,9 +163,10 @@ public final class ServerConfig {
     }
     // Default issuer is derived from the bind address; an operator behind a reverse proxy should
     // set --issuer explicitly to the externally-reachable URL.
-    final String resolvedIssuer = issuer != null && !issuer.isBlank()
+    final boolean issuerExplicit = issuer != null && !issuer.isBlank();
+    final String resolvedIssuer = issuerExplicit
         ? stripTrailingSlash(issuer)
-        : "http://" + resolvedHost + ":" + resolvedPort;
+        : defaultIssuer(resolvedHost, resolvedPort);
 
     final Path resolvedDataDir = dataDir != null ? Paths.get(dataDir) : defaultDataDir(env);
     final Path adminTokenFilePath = adminTokenFile != null ? Paths.get(adminTokenFile) : null;
@@ -146,9 +177,47 @@ public final class ServerConfig {
     final int kmsPort = kmsTcp == null ? 0 : portOf(kmsTcp);
     final Path kmsApiTokenFilePath = kmsApiTokenFile != null ? Paths.get(kmsApiTokenFile) : null;
 
-    return new ServerConfig(resolvedHost, resolvedPort, resolvedIssuer, resolvedAudience,
-        Duration.ofSeconds(resolvedTtl), resolvedDataDir, adminTokenFilePath,
-        directoryUrl, directoryTokenFilePath, kmsHost, kmsPort, kmsKeyGroup, kmsApiTokenFilePath);
+    final Path serviceAccountsFilePath = serviceAccountsFile != null && !serviceAccountsFile.isBlank()
+        ? Paths.get(serviceAccountsFile) : null;
+
+    return new ServerConfig(resolvedHost, resolvedPort, resolvedIssuer, issuerExplicit,
+        resolvedAudience, audienceAlgorithms, Duration.ofSeconds(resolvedTtl), resolvedDataDir,
+        adminTokenFilePath, directoryUrl, directoryTokenFilePath, kmsHost, kmsPort, kmsKeyGroup,
+        kmsApiTokenFilePath, serviceAccountsFilePath);
+  }
+
+  /**
+   * This configuration with the port the server actually bound. When the configured port was 0
+   * (ephemeral) and no issuer was given, the default issuer is re-derived from the bound port, so
+   * {@code iss}, discovery and the JWKS URL name an address that actually answers. An explicit
+   * {@code --issuer} is never touched.
+   *
+   * @param boundPort the port the HTTP server bound.
+   * @return the adjusted configuration (or this one, if nothing changes).
+   */
+  public ServerConfig withBoundPort(final int boundPort) {
+    if (boundPort == port) {
+      return this;
+    }
+    final String adjustedIssuer = issuerExplicit ? issuer : defaultIssuer(host, boundPort);
+    return new ServerConfig(host, boundPort, adjustedIssuer, issuerExplicit, audience,
+        audienceAlgorithms, tokenTtl, dataDir, adminTokenFilePath, directoryUrl,
+        directoryTokenFilePath, kmsHost, kmsPort, kmsKeyGroup, kmsApiTokenFilePath,
+        serviceAccountsFilePath);
+  }
+
+  private static String defaultIssuer(final String host, final int port) {
+    return "http://" + host + ":" + port;
+  }
+
+  /** Parse one {@code AUDIENCE=ALG} mapping into {@code into}. */
+  private static void putAudienceAlgorithm(final Map<String, SigningAlgorithm> into,
+                                           final String mapping) {
+    final int eq = mapping.lastIndexOf('=');
+    if (eq <= 0 || eq == mapping.length() - 1) {
+      throw new IllegalArgumentException("audience algorithm must be AUDIENCE=ALG, e.g. config-server=ES256");
+    }
+    into.put(mapping.substring(0, eq).trim(), SigningAlgorithm.fromJwsName(mapping.substring(eq + 1)));
   }
 
   private static String hostOf(final String hostPort) {
@@ -207,9 +276,29 @@ public final class ServerConfig {
     return issuer;
   }
 
-  /** @return the token audience ({@code aud} claim). */
+  /** @return the default token audience ({@code aud} claim when a client names none). */
   public String audience() {
     return audience;
+  }
+
+  /** @return the configured audience → algorithm mappings (audiences not listed use EdDSA). */
+  public Map<String, SigningAlgorithm> audienceAlgorithms() {
+    return audienceAlgorithms;
+  }
+
+  /** @return the algorithm tokens for {@code tokenAudience} are signed with (EdDSA unless mapped). */
+  public SigningAlgorithm signingAlgorithmFor(final String tokenAudience) {
+    return audienceAlgorithms.getOrDefault(tokenAudience, SigningAlgorithm.EDDSA);
+  }
+
+  /** @return whether any audience is mapped to ES256 (so an ES256 key set is needed). */
+  public boolean es256Enabled() {
+    return audienceAlgorithms.containsValue(SigningAlgorithm.ES256);
+  }
+
+  /** @return the service-account seed file (in-memory directory mode), or null. */
+  public Path serviceAccountsFilePath() {
+    return serviceAccountsFilePath;
   }
 
   /** @return the access-token lifetime. */

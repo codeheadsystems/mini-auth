@@ -5,8 +5,10 @@ import com.codeheadsystems.minitoken.auth.Grant;
 import com.codeheadsystems.minitoken.auth.KeyOperation;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -22,6 +24,12 @@ import tools.jackson.databind.JsonNode;
  * <p>Grants whose action is not a known {@link KeyOperation}, or whose resource is the wildcard
  * {@code "*"}, are ignored: they belong to other consumers (e.g. OIDC scopes) and are not part of
  * mini-idp's key-group authorization.
+ *
+ * <p><b>Audience allowlist.</b> The audiences a service account may request per token are stored in
+ * mini-directory as ordinary grants with the action {@value #AUDIENCE_ACTION} and the audience as
+ * the resource — e.g. {@code {"action":"token:audience","resource":"config-server"}}. That keeps the
+ * allowlist in the identity source of truth with no new directory schema; {@link #audiences} reads
+ * it back. A wildcard resource is <em>not</em> honored: the allowlist is always explicit.
  */
 public final class Authorizations {
 
@@ -49,6 +57,28 @@ public final class Authorizations {
     byKeyGroup.forEach((keyGroup, ops) ->
         result.add(new Grant(keyGroup, new java.util.LinkedHashSet<>(ops))));
     return new Authorization(admin, result);
+  }
+
+  /** The directory grant action that allowlists an audience for a service account. */
+  public static final String AUDIENCE_ACTION = "token:audience";
+
+  /**
+   * @param grants the resolved grants, each a JSON object with {@code action} + {@code resource}.
+   * @return the audiences the account may request (the resources of its {@value #AUDIENCE_ACTION}
+   *     grants, excluding the wildcard).
+   */
+  public static Set<String> audiences(final JsonNode grants) {
+    final Set<String> result = new LinkedHashSet<>();
+    if (grants != null) {
+      for (final JsonNode grant : grants) {
+        final String resource = text(grant, "resource");
+        if (AUDIENCE_ACTION.equals(text(grant, "action")) && resource != null
+            && !resource.isBlank() && !"*".equals(resource)) {
+          result.add(resource);
+        }
+      }
+    }
+    return result;
   }
 
   private static KeyOperation keyOperation(final String action) {

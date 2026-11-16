@@ -18,7 +18,8 @@ import tools.jackson.databind.node.ObjectNode;
  * {@code /admin/service-accounts/authenticate} endpoint (with the directory admin bearer proving
  * mini-idp is an authorized issuer); mini-directory verifies the Argon2id secret in constant time —
  * the secret hash never leaves the directory — and returns the resolved principal + grants, which
- * are reassembled into a mini-token {@link Authorization}.
+ * are reassembled into a mini-token {@link Authorization} (plus the per-token audience allowlist,
+ * carried as {@code token:audience} grants — see {@link Authorizations#audiences}).
  *
  * <p>Any non-200 (unknown client, wrong/disabled, directory unreachable) maps to {@link
  * Optional#empty()} — the token endpoint then surfaces one generic {@code invalid_client}. The admin
@@ -63,7 +64,8 @@ public final class HttpServiceAccountDirectory implements ServiceAccountDirector
       final JsonNode resolution = MAPPER.readTree(response.body());
       final boolean admin = resolution.has("admin") && resolution.get("admin").asBoolean();
       final Authorization authorization = Authorizations.fromResolution(admin, resolution.get("grants"));
-      return Optional.of(new ResolvedClient(resolution.get("id").asString(), authorization));
+      return Optional.of(new ResolvedClient(resolution.get("id").asString(), authorization,
+          Authorizations.audiences(resolution.get("grants"))));
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();
       return Optional.empty();

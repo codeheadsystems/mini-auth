@@ -1,5 +1,6 @@
 package com.codeheadsystems.minitoken.token;
 
+import com.codeheadsystems.minitoken.crypto.SigningAlgorithm;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
@@ -10,7 +11,8 @@ import java.security.Signature;
 import java.util.Map;
 
 /**
- * Hand-rolled compact-serialization JWS (RFC 7515), signed with Ed25519/EdDSA.
+ * Hand-rolled compact-serialization JWS (RFC 7515), signed with Ed25519/EdDSA (the default) or
+ * ES256 (ECDSA P-256), as the header's {@code alg} names.
  *
  * <p>We assemble the token by hand rather than depend on a JOSE library — the same way mini-kms
  * hand-rolls its envelope formats — because a compact JWS is genuinely simple and worth being
@@ -27,6 +29,12 @@ import java.util.Map;
  * and checks the Ed25519 signature over it; this is what lets a verifier validate offline with
  * only the public JWK. We never parse-then-reserialize before verifying, so a token always
  * verifies against the exact bytes it was signed over.
+ *
+ * <p><b>Choosing the algorithm.</b> When signing, the header's {@code alg} selects the JCA signature
+ * (see {@link SigningAlgorithm}); the issuer builds that header from the key it signs with, so the
+ * two always agree. When verifying, the algorithm is pinned by the caller, never read from the
+ * token: {@link #verifySignature(Parts, PublicKey)} is Ed25519-only, and the
+ * {@link #verifySignature(Parts, PublicKey, SigningAlgorithm)} overload takes it explicitly.
  */
 public final class Jws {
 
@@ -40,14 +48,14 @@ public final class Jws {
    *
    * @param header     the protected header (carries {@code kid}).
    * @param claims     the claim set serialized as the payload.
-   * @param privateKey the Ed25519 private key.
+   * @param privateKey the private key matching the header's {@code alg} (Ed25519 or EC P-256).
    * @return the compact JWS: {@code header.payload.signature}.
    */
   public static String sign(final JwsHeader header, final JwtClaims claims, final PrivateKey privateKey) {
     final String headerSegment = Base64Url.encode(toJson(header));
     final String payloadSegment = Base64Url.encode(toJson(claims));
     final String signingInput = headerSegment + "." + payloadSegment;
-    final byte[] signature = ed25519Sign(privateKey, signingInput.getBytes(StandardCharsets.US_ASCII));
+    final byte[] signature = signBytes(header, privateKey, signingInput.getBytes(StandardCharsets.US_ASCII));
     return signingInput + "." + Base64Url.encode(signature);
   }
 
@@ -68,7 +76,7 @@ public final class Jws {
    *
    * @param header     the protected header (carries {@code kid}).
    * @param claims     the claim set serialized as the JSON payload.
-   * @param privateKey the Ed25519 private key.
+   * @param privateKey the private key matching the header's {@code alg} (Ed25519 or EC P-256).
    * @return the compact JWS: {@code header.payload.signature}.
    */
   public static String sign(final JwsHeader header, final Map<String, ?> claims,
@@ -76,7 +84,7 @@ public final class Jws {
     final String headerSegment = Base64Url.encode(toJson(header));
     final String payloadSegment = Base64Url.encode(toJson(claims));
     final String signingInput = headerSegment + "." + payloadSegment;
-    final byte[] signature = ed25519Sign(privateKey, signingInput.getBytes(StandardCharsets.US_ASCII));
+    final byte[] signature = signBytes(header, privateKey, signingInput.getBytes(StandardCharsets.US_ASCII));
     return signingInput + "." + Base64Url.encode(signature);
   }
 
@@ -109,9 +117,23 @@ public final class Jws {
    * @return whether the signature is valid.
    */
   public static boolean verifySignature(final Parts parts, final PublicKey publicKey) {
+    return verifySignature(parts, publicKey, SigningAlgorithm.EDDSA);
+  }
+
+  /**
+   * Verify a token's signature with an explicitly pinned algorithm (never the token's own
+   * {@code alg}). For ES256 the signature must be the raw 64-byte {@code R || S}.
+   *
+   * @param parts     the split token segments.
+   * @param publicKey the public key to verify against.
+   * @param algorithm the algorithm the caller expects this key to sign with.
+   * @return whether the signature is valid.
+   */
+  public static boolean verifySignature(final Parts parts, final PublicKey publicKey,
+                                        final SigningAlgorithm algorithm) {
     final String signingInput = parts.header() + "." + parts.payload();
     try {
-      final Signature verifier = Signature.getInstance("Ed25519");
+      final Signature verifier = Signature.getInstance(algorithm.jcaSignature());
       verifier.initVerify(publicKey);
       verifier.update(signingInput.getBytes(StandardCharsets.US_ASCII));
       return verifier.verify(Base64Url.decode(parts.signature()));
@@ -131,14 +153,22 @@ public final class Jws {
     return fromJson(Base64Url.decode(parts.payload()), JwtClaims.class);
   }
 
-  private static byte[] ed25519Sign(final PrivateKey privateKey, final byte[] message) {
+  /**
+   * Sign with the algorithm the header names. A header with no {@code alg} keeps the historical
+   * Ed25519 behavior. For ES256, {@code SHA256withECDSAinP1363Format} yields the raw {@code R || S}
+   * JWS requires (plain {@code SHA256withECDSA} would yield DER, which JOSE verifiers reject).
+   */
+  private static byte[] signBytes(final JwsHeader header, final PrivateKey privateKey,
+                                  final byte[] message) {
+    final SigningAlgorithm algorithm = header.algorithm() == null
+        ? SigningAlgorithm.EDDSA : SigningAlgorithm.fromJwsName(header.algorithm());
     try {
-      final Signature signer = Signature.getInstance("Ed25519");
+      final Signature signer = Signature.getInstance(algorithm.jcaSignature());
       signer.initSign(privateKey);
       signer.update(message);
       return signer.sign();
     } catch (final GeneralSecurityException e) {
-      throw new IllegalStateException("Ed25519 signing failed", e);
+      throw new IllegalStateException(algorithm.jwsName() + " signing failed", e);
     }
   }
 

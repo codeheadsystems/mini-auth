@@ -8,6 +8,9 @@ import com.codeheadsystems.miniidp.server.http.HttpResponse;
 import com.codeheadsystems.miniidp.server.http.Json;
 import com.codeheadsystems.miniidp.server.http.RequestContext;
 import com.codeheadsystems.miniidp.server.http.Router;
+import com.codeheadsystems.minitoken.crypto.SigningAlgorithm;
+import com.codeheadsystems.minitoken.jwks.Jwk;
+import com.codeheadsystems.minitoken.jwks.JwkSet;
 import com.codeheadsystems.minitoken.service.AuditService;
 import com.codeheadsystems.minitoken.service.RevocationService;
 import com.codeheadsystems.minitoken.service.SigningKeyService;
@@ -15,8 +18,10 @@ import com.codeheadsystems.minitoken.service.TokenIssuer;
 import com.codeheadsystems.minitoken.service.TokenIssuer.IssuedToken;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,12 +39,21 @@ import java.util.Optional;
  * place). The token endpoint's contract is unchanged: client_credentials only, the same claim set,
  * and a single generic {@code invalid_client} for any authentication failure (no oracle). The
  * remaining admin endpoints are mini-idp's own concern — key rotation, revocation, and the audit log.
+ *
+ * <p><b>Per-token audience (additive).</b> A client may name the audience it wants with RFC 8707's
+ * {@code resource} or the {@code audience} form parameter. With neither, the token carries the
+ * configured default audience exactly as before. A named audience must be the default or one of the
+ * client's allowlisted audiences ({@link ResolvedClient#audiences()}); anything else is a 400
+ * {@code invalid_target} — returned only <em>after</em> the client authenticated, so it reveals
+ * nothing to an unauthenticated caller. The audience also picks the signing algorithm
+ * ({@link ServerConfig#signingAlgorithmFor}): EdDSA unless the operator mapped it to ES256.
  */
 public final class ApiHandlers {
 
   private final ServerConfig config;
   private final ServiceAccountDirectory directory;
   private final SigningKeyService signingKeys;
+  private final Map<SigningAlgorithm, SigningKeyService> keySets;
   private final RevocationService revocations;
   private final AuditService audit;
   private final TokenIssuer tokenIssuer;
@@ -47,15 +61,38 @@ public final class ApiHandlers {
   private final OpenApiDocument openApi;
   private final Clock clock;
 
-  /** Wire the handlers with their collaborators. */
+  /** Wire the handlers with their collaborators (Ed25519 signing only). */
   public ApiHandlers(final ServerConfig config, final ServiceAccountDirectory directory,
                      final SigningKeyService signingKeys, final RevocationService revocations,
                      final AuditService audit, final TokenIssuer tokenIssuer,
                      final AdminAuthenticator adminAuth, final OpenApiDocument openApi,
                      final Clock clock) {
+    this(config, directory, Map.of(SigningAlgorithm.EDDSA, signingKeys), revocations, audit,
+        tokenIssuer, adminAuth, openApi, clock);
+  }
+
+  /**
+   * Wire the handlers with one signing-key set per algorithm. The EdDSA set is required (it signs
+   * the default audience); others are present only when an audience is mapped to them.
+   */
+  public ApiHandlers(final ServerConfig config, final ServiceAccountDirectory directory,
+                     final Map<SigningAlgorithm, SigningKeyService> keySets,
+                     final RevocationService revocations, final AuditService audit,
+                     final TokenIssuer tokenIssuer, final AdminAuthenticator adminAuth,
+                     final OpenApiDocument openApi, final Clock clock) {
+    final SigningKeyService eddsa = keySets.get(SigningAlgorithm.EDDSA);
+    if (eddsa == null) {
+      throw new IllegalArgumentException("an EdDSA signing-key set is required");
+    }
+    for (final SigningAlgorithm needed : config.audienceAlgorithms().values()) {
+      if (!keySets.containsKey(needed)) {
+        throw new IllegalArgumentException("no signing-key set for " + needed.jwsName());
+      }
+    }
     this.config = config;
     this.directory = directory;
-    this.signingKeys = signingKeys;
+    this.signingKeys = eddsa;
+    this.keySets = new EnumMap<>(keySets);
     this.revocations = revocations;
     this.audit = audit;
     this.tokenIssuer = tokenIssuer;
@@ -71,6 +108,10 @@ public final class ApiHandlers {
     router.route("POST", "/oauth/token", this::token);
     router.route("GET", "/.well-known/jwks.json", this::jwks);
     router.route("GET", "/.well-known/idp-configuration", this::discovery);
+    // The same document under the standard names: OpenID Connect Discovery 1.0 (what config-server
+    // and most JOSE stacks fetch) and RFC 8414 OAuth 2.0 Authorization Server Metadata.
+    router.route("GET", "/.well-known/openid-configuration", this::discovery);
+    router.route("GET", "/.well-known/oauth-authorization-server", this::discovery);
     router.route("GET", "/health", this::health);
     router.route("GET", "/openapi.yaml", this::openApiYaml);
     router.route("GET", "/openapi.json", this::openApiJson);
@@ -114,8 +155,12 @@ public final class ApiHandlers {
     // Single generic failure regardless of which check failed (no credential oracle).
     final ResolvedClient client = resolved.orElseThrow(ApiException::invalidClient);
 
-    final IssuedToken issued = tokenIssuer.issue(client.subject(), client.authorization());
-    audit.record("token.issued", client.subject(), "jti=" + issued.jti());
+    final String tokenAudience = requestedAudience(form, client);
+    final SigningAlgorithm algorithm = config.signingAlgorithmFor(tokenAudience);
+    final IssuedToken issued = tokenIssuer.issue(
+        client.subject(), client.authorization(), tokenAudience, keySets.get(algorithm));
+    audit.record("token.issued", client.subject(),
+        "jti=" + issued.jti() + " aud=" + tokenAudience + " alg=" + algorithm.jwsName());
 
     final Map<String, Object> body = new LinkedHashMap<>();
     body.put("access_token", issued.accessToken());
@@ -125,8 +170,42 @@ public final class ApiHandlers {
     return HttpResponse.json(200, body);
   }
 
+  /**
+   * The audience for this token: the default when the client names none, else the one it names via
+   * {@code resource} (RFC 8707) or {@code audience}, if the client may have it.
+   */
+  private String requestedAudience(final Map<String, String> form, final ResolvedClient client) {
+    final String resource = blankToNull(form.get("resource"));
+    final String audienceParam = blankToNull(form.get("audience"));
+    if (resource != null && audienceParam != null && !resource.equals(audienceParam)) {
+      throw new ApiException(400, "invalid_target", "resource and audience name different targets");
+    }
+    final String requested = resource != null ? resource : audienceParam;
+    if (requested == null || requested.equals(tokenIssuer.defaultAudience())) {
+      return tokenIssuer.defaultAudience();
+    }
+    if (!client.audiences().contains(requested)) {
+      throw new ApiException(400, "invalid_target", "the requested audience is not allowed for this client");
+    }
+    return requested;
+  }
+
+  private static String blankToNull(final String value) {
+    return value == null || value.isBlank() ? null : value;
+  }
+
+  /** Every key set's published keys in one JWKS (EdDSA first, as before). */
   private HttpResponse jwks(final RequestContext ctx) {
-    return HttpResponse.json(200, signingKeys.jwkSet());
+    final List<Jwk> keys = new ArrayList<>();
+    for (final SigningKeyService keySet : keySets.values()) {
+      keys.addAll(keySet.jwkSet().keys());
+    }
+    return HttpResponse.json(200, new JwkSet(keys));
+  }
+
+  /** The JOSE names of the algorithms this issuer signs with ({@code ["EdDSA"]} or {@code ["EdDSA","ES256"]}). */
+  private List<String> signingAlgorithms() {
+    return keySets.keySet().stream().map(SigningAlgorithm::jwsName).toList();
   }
 
   private HttpResponse discovery(final RequestContext ctx) {
@@ -137,8 +216,8 @@ public final class ApiHandlers {
     doc.put("grant_types_supported", List.of("client_credentials"));
     doc.put("token_endpoint_auth_methods_supported",
         List.of("client_secret_post", "client_secret_basic"));
-    doc.put("token_endpoint_auth_signing_alg_values_supported", List.of("EdDSA"));
-    doc.put("id_token_signing_alg_values_supported", List.of("EdDSA"));
+    doc.put("token_endpoint_auth_signing_alg_values_supported", signingAlgorithms());
+    doc.put("id_token_signing_alg_values_supported", signingAlgorithms());
     return HttpResponse.json(200, doc);
   }
 
@@ -167,9 +246,19 @@ public final class ApiHandlers {
 
   private HttpResponse rotateKeys(final RequestContext ctx) {
     requireAdmin(ctx);
-    final String newKid = signingKeys.rotate();
-    audit.record("key.rotated", null, "activeKid=" + newKid);
-    return HttpResponse.json(200, Map.of("activeKid", newKid));
+    // Rotate every key set together (same rules for each). `activeKid` stays the EdDSA kid, as
+    // before; `activeKids` adds one entry per algorithm.
+    final Map<String, String> activeKids = new LinkedHashMap<>();
+    for (final Map.Entry<SigningAlgorithm, SigningKeyService> keySet : keySets.entrySet()) {
+      activeKids.put(keySet.getKey().jwsName(), keySet.getValue().rotate());
+    }
+    final String newKid = activeKids.get(SigningAlgorithm.EDDSA.jwsName());
+    audit.record("key.rotated", null, "activeKid=" + newKid
+        + (activeKids.size() > 1 ? " activeKids=" + activeKids : ""));
+    final Map<String, Object> body = new LinkedHashMap<>();
+    body.put("activeKid", newKid);
+    body.put("activeKids", activeKids);
+    return HttpResponse.json(200, body);
   }
 
   private HttpResponse revoke(final RequestContext ctx) {

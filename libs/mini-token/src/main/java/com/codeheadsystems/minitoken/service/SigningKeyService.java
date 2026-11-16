@@ -1,6 +1,6 @@
 package com.codeheadsystems.minitoken.service;
 
-import com.codeheadsystems.minitoken.crypto.Ed25519Keys;
+import com.codeheadsystems.minitoken.crypto.SigningAlgorithm;
 import com.codeheadsystems.minitoken.jwks.Jwk;
 import com.codeheadsystems.minitoken.jwks.JwkSet;
 import com.codeheadsystems.minitoken.model.SigningKeyRecord;
@@ -12,10 +12,11 @@ import java.security.PrivateKey;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 
 /**
- * Manages the Ed25519 signing keys: exactly one <b>active</b> key signs new tokens, while recently
+ * Manages one algorithm's signing keys (Ed25519 by default, or ES256): exactly one <b>active</b> key signs new tokens, while recently
  * <b>retired</b> keys stay published in the JWKS so tokens they already signed keep verifying
  * until they expire.
  *
@@ -27,10 +28,17 @@ import java.util.List;
  * <p>State is persisted via the {@link DocumentStore} SPI; the document holds private keys, so a
  * file-backed implementation should restrict it to owner-only ({@code 0600}). All methods are
  * {@code synchronized}; rotation is rare and signing is cheap, so a single lock is adequate.
+ *
+ * <p><b>One service per algorithm.</b> An issuer that signs with both Ed25519 and ES256 (mini-idp,
+ * when an audience is mapped to ES256) runs two of these over two stores, so each algorithm has its
+ * own active key, kid, rotation and retention, and the existing Ed25519 file is untouched. The
+ * persisted record shape is the same for both (PKCS#8 + SPKI, base64); the service's algorithm says
+ * how to read it.
  */
 public final class SigningKeyService {
 
   private final DocumentStore<SigningKeys> store;
+  private final SigningAlgorithm algorithm;
   private final RandomIds ids;
   private final Clock clock;
   private final Duration retiredKeyRetention;
@@ -45,6 +53,21 @@ public final class SigningKeyService {
    */
   public SigningKeyService(final DocumentStore<SigningKeys> store, final RandomIds ids,
                            final Clock clock, final Duration retiredKeyRetention) {
+    this(store, SigningAlgorithm.EDDSA, ids, clock, retiredKeyRetention);
+  }
+
+  /**
+   * @param store               the backing JSON store, holding only keys of {@code algorithm}.
+   * @param algorithm           the algorithm every key in this set signs with.
+   * @param ids                 the random kid generator.
+   * @param clock               the clock for created/retired timestamps and pruning.
+   * @param retiredKeyRetention how long a retired key stays published; must exceed the token TTL.
+   */
+  public SigningKeyService(final DocumentStore<SigningKeys> store, final SigningAlgorithm algorithm,
+                           final RandomIds ids, final Clock clock, final Duration retiredKeyRetention) {
+    if (algorithm == null) {
+      throw new IllegalArgumentException("algorithm must not be null");
+    }
     if (retiredKeyRetention == null || retiredKeyRetention.isNegative() || retiredKeyRetention.isZero()) {
       // The full invariant — retention MUST exceed the max token TTL, or a token signed just before
       // a rotation can outlive its kid in the JWKS and fail verification — is a numeric relationship
@@ -53,6 +76,7 @@ public final class SigningKeyService {
       throw new IllegalArgumentException("retiredKeyRetention must be positive and exceed the max token TTL");
     }
     this.store = store;
+    this.algorithm = algorithm;
     this.ids = ids;
     this.clock = clock;
     this.retiredKeyRetention = retiredKeyRetention;
@@ -74,7 +98,7 @@ public final class SigningKeyService {
     if (active == null) {
       throw new IllegalStateException("no active signing key");
     }
-    return new Signer(active.kid(), Ed25519Keys.decodePrivate(active.privatePkcs8Base64()));
+    return new Signer(active.kid(), algorithm.decodePrivate(active.privatePkcs8Base64()), algorithm);
   }
 
   /**
@@ -87,7 +111,7 @@ public final class SigningKeyService {
     pruneExpiredRetired();
     final List<Jwk> jwks = new ArrayList<>();
     for (final SigningKeyRecord key : keys) {
-      jwks.add(Jwk.forEd25519(key.kid(), Ed25519Keys.decodePublic(key.publicSpkiBase64())));
+      jwks.add(algorithm.jwk(key.kid(), algorithm.decodePublic(key.publicSpkiBase64())));
     }
     return new JwkSet(jwks);
   }
@@ -111,18 +135,24 @@ public final class SigningKeyService {
     return activeKid;
   }
 
+  /** @return the algorithm every key in this set signs with. */
+  public SigningAlgorithm algorithm() {
+    return algorithm;
+  }
+
   /** @return the active kid (for diagnostics/tests). */
   public synchronized String activeKid() {
     return activeKid;
   }
 
   private void generateActive() {
-    final KeyPair pair = Ed25519Keys.generate();
+    final KeyPair pair = algorithm.generate();
     final String kid = ids.newKid();
+    // PKCS#8 / SPKI DER, base64 — the same at-rest encoding for every algorithm.
     keys.add(new SigningKeyRecord(
         kid,
-        Ed25519Keys.encodePrivate(pair.getPrivate()),
-        Ed25519Keys.encodePublic(pair.getPublic()),
+        Base64.getEncoder().encodeToString(pair.getPrivate().getEncoded()),
+        Base64.getEncoder().encodeToString(pair.getPublic().getEncoded()),
         true,
         clock.instant().getEpochSecond(),
         null));
@@ -148,12 +178,18 @@ public final class SigningKeyService {
   }
 
   /**
-   * The material needed to sign a token: the key id (for the JWS {@code kid} header) and the
-   * Ed25519 private key.
+   * The material needed to sign a token: the key id (for the JWS {@code kid} header), the private
+   * key, and the algorithm it signs with (for the JWS {@code alg} header).
    *
    * @param kid        the active key id.
    * @param privateKey the active private key.
+   * @param algorithm  the key's signature algorithm.
    */
-  public record Signer(String kid, PrivateKey privateKey) {
+  public record Signer(String kid, PrivateKey privateKey, SigningAlgorithm algorithm) {
+
+    /** An Ed25519 signer (the historical two-field form). */
+    public Signer(final String kid, final PrivateKey privateKey) {
+      this(kid, privateKey, SigningAlgorithm.EDDSA);
+    }
   }
 }

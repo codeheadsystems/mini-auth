@@ -24,6 +24,7 @@ as a flag. Each service reads it from an environment variable, or — preferred 
 | mini-idp | `MINIIDP_ADMIN_TOKEN` | `--admin-token-file` |
 | mini-idp → directory | `MINIIDP_DIRECTORY_TOKEN` | `--directory-token-file` |
 | mini-idp → kms | `MINIIDP_KMS_API_TOKEN` | `--kms-api-token-file` |
+| mini-idp seeded service accounts (no mini-directory; tests/containers) | `MINIIDP_SERVICE_ACCOUNTS` (inline JSON) | `--service-accounts-file` |
 | mini-oidc | `MINIOIDC_ADMIN_TOKEN` | `--admin-token-file` |
 | mini-oidc → directory | `MINIOIDC_DIRECTORY_TOKEN` | `--directory-token-file` |
 | mini-kms | `MINIKMS_API_TOKEN`, `MINIKMS_ADMIN_TOKEN`, `MINIKMS_PASSPHRASE` | `--admin-token-file`, … |

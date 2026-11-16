@@ -12,7 +12,7 @@
  *
  *   services/  — deployable front doors (base packages com.codeheadsystems.mini<name>):
  *     :services:mini-kms:core / :services:mini-kms:server / :services:mini-kms:client
- *     :services:mini-idp:core / :services:mini-idp:server
+ *     :services:mini-idp:core / :services:mini-idp:server / :services:mini-idp:testkit (embeddable test issuer)
  *     :services:mini-oidc       human SSO / OpenID Provider (auth-code + PKCE); embeds pk-auth
  *     :services:mini-gateway    forward-auth endpoint for a reverse proxy (Traefik/Caddy/nginx)
  *     :services:mini-directory  identity source of truth: users, groups, roles, service accounts
@@ -55,6 +55,7 @@ include("services:mini-kms:server")
 include("services:mini-kms:client")
 include("services:mini-idp:core")
 include("services:mini-idp:server")
+include("services:mini-idp:testkit")
 include("services:mini-oidc")
 include("services:mini-gateway")
 include("services:mini-directory")

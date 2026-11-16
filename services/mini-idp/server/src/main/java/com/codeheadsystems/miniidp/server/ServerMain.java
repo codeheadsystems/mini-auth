@@ -1,6 +1,7 @@
 package com.codeheadsystems.miniidp.server;
 
 import com.codeheadsystems.miniidp.directory.HttpServiceAccountDirectory;
+import com.codeheadsystems.miniidp.directory.SeededServiceAccounts;
 import com.codeheadsystems.miniidp.directory.ServiceAccountDirectory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -33,6 +34,12 @@ public final class ServerMain {
 
   /** Env var carrying the mini-directory admin token (mini-idp reads service accounts from there). */
   static final String ENV_DIRECTORY_TOKEN = "MINIIDP_DIRECTORY_TOKEN";
+
+  /**
+   * Env var carrying an inline service-account seed (JSON) for the in-memory directory mode — the
+   * container image / integration-test path. It holds secrets, so it is env or file only, never argv.
+   */
+  static final String ENV_SERVICE_ACCOUNTS = "MINIIDP_SERVICE_ACCOUNTS";
 
   private ServerMain() {
   }
@@ -68,9 +75,13 @@ public final class ServerMain {
     // Never print the admin token or any secret — only non-sensitive runtime facts.
     System.out.println("mini-idp is running on http://" + server.address().getHostString()
         + ":" + server.address().getPort());
-    System.out.println("issuer=" + config.issuer() + "  audience=" + config.audience()
+    System.out.println("default audience=" + config.audience()
         + "  token TTL=" + config.tokenTtl().toSeconds() + "s");
-    System.out.println("service accounts: read from mini-directory at " + config.directoryUrl());
+    System.out.println("issuer=" + server.config().issuer() + (server.config().audienceAlgorithms().isEmpty()
+        ? "" : "  audience algorithms=" + server.config().audienceAlgorithms()));
+    System.out.println(config.directoryConfigured()
+        ? "service accounts: read from mini-directory at " + config.directoryUrl()
+        : "service accounts: in-memory, seeded from configuration (no mini-directory)");
     System.out.println("signing keys: " + (config.kmsEnabled()
         ? "wrapped under mini-kms group '" + config.kmsKeyGroup() + "' at " + config.kmsHost() + ":" + config.kmsPort()
         : "local file (plaintext, 0600)"));
@@ -120,12 +131,33 @@ public final class ServerMain {
     throw new IllegalStateException(message);
   }
 
-  /** Build the mini-directory-backed service-account source (required — there is no local registry). */
+  /**
+   * Build the service-account source: mini-directory over HTTP (the production path), or — when a
+   * seed is given instead ({@code MINIIDP_SERVICE_ACCOUNTS} / {@code --service-accounts-file}) — an
+   * in-memory directory for the container image and integration tests. Exactly one must be set.
+   */
   private static ServiceAccountDirectory resolveDirectory(final Map<String, String> env,
                                                           final ServerConfig config) throws IOException {
+    final String inlineSeed = env.get(ENV_SERVICE_ACCOUNTS);
+    final boolean seeded = (inlineSeed != null && !inlineSeed.isBlank())
+        || config.serviceAccountsFilePath() != null;
+    if (seeded && config.directoryConfigured()) {
+      throw new IllegalStateException("set either --directory-url or a service-account seed, not both");
+    }
+    if (seeded) {
+      if (inlineSeed != null && !inlineSeed.isBlank() && config.serviceAccountsFilePath() != null) {
+        throw new IllegalStateException("set either " + ENV_SERVICE_ACCOUNTS
+            + " or --service-accounts-file, not both");
+      }
+      final String json = inlineSeed != null && !inlineSeed.isBlank()
+          ? inlineSeed
+          : Files.readString(config.serviceAccountsFilePath(), StandardCharsets.UTF_8);
+      return SeededServiceAccounts.parse(json);
+    }
     if (!config.directoryConfigured()) {
       throw new IllegalStateException("no mini-directory configured: set --directory-url "
-          + "(mini-idp reads service accounts from mini-directory; there is no local client registry)");
+          + "(or, without mini-directory, seed service accounts with " + ENV_SERVICE_ACCOUNTS
+          + " / --service-accounts-file)");
     }
     final String token = resolveToken(env.get(ENV_DIRECTORY_TOKEN), config.directoryTokenFilePath(),
         "no mini-directory token: set " + ENV_DIRECTORY_TOKEN + " or provide --directory-token-file");

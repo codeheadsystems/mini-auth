@@ -4,6 +4,7 @@ import com.codeheadsystems.miniidp.directory.ServiceAccountDirectory;
 import com.codeheadsystems.miniidp.server.http.Router;
 import com.codeheadsystems.miniidp.store.JsonStore;
 import com.codeheadsystems.minikms.client.KmsSigningKeyStore;
+import com.codeheadsystems.minitoken.crypto.SigningAlgorithm;
 import com.codeheadsystems.minitoken.service.AuditService;
 import com.codeheadsystems.minitoken.service.RevocationService;
 import com.codeheadsystems.minitoken.service.SigningKeyService;
@@ -17,6 +18,8 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Clock;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.concurrent.Executors;
 
 /**
@@ -28,6 +31,13 @@ import java.util.concurrent.Executors;
  * and the JDK HTTP server. Each request runs on a <b>virtual thread</b> (the executor below), so
  * the handful of blocking handlers scale without a thread pool to size — the same per-connection
  * model mini-kms uses for its sockets.
+ *
+ * <p><b>Signing keys per algorithm.</b> Ed25519 ({@code signing-keys.json}) always exists and signs
+ * every token for the default audience. When any audience is mapped to ES256
+ * ({@code --audience-algorithm config-server=ES256}), a second, independent key set
+ * ({@code signing-keys-es256.json}) is created with the same rotation/retention rules and the same
+ * at-rest protection (KMS-wrapped when {@code --kms-*} is set), and its public keys are published in
+ * the same JWKS. Without such a mapping nothing about the key material or JWKS changes.
  *
  * <p>Binding is loopback-only by default (see {@link ServerConfig#host()}): like mini-kms, this is
  * a local-trust service, and exposing it beyond loopback is an explicit operator decision.
@@ -71,10 +81,33 @@ public final class IdpServer {
   public static IdpServer create(final ServerConfig config, final String adminToken,
                                  final String kmsApiToken, final ServiceAccountDirectory directory,
                                  final Clock clock) throws IOException {
+    // Bind first, so an ephemeral port (--port 0) is known before the issuer URL is fixed: with no
+    // explicit --issuer, iss / discovery / jwks_uri then name the address that actually answers.
+    final HttpServer http = HttpServer.create(new InetSocketAddress(config.host(), config.port()), 0);
+    final ServerConfig bound = config.withBoundPort(http.getAddress().getPort());
+    try {
+      return assemble(http, bound, adminToken, kmsApiToken, directory, clock);
+    } catch (final IOException | RuntimeException e) {
+      http.stop(0);
+      throw e;
+    }
+  }
+
+  private static IdpServer assemble(final HttpServer http, final ServerConfig config,
+                                    final String adminToken, final String kmsApiToken,
+                                    final ServiceAccountDirectory directory, final Clock clock)
+      throws IOException {
     final RandomIds ids = new RandomIds();
     final SigningKeyService signingKeys = new SigningKeyService(
-        signingKeyStore(config, kmsApiToken),
+        signingKeyStore(config, kmsApiToken, "signing-keys.json"),
         ids, clock, config.retiredKeyRetention());
+    final Map<SigningAlgorithm, SigningKeyService> keySets = new EnumMap<>(SigningAlgorithm.class);
+    keySets.put(SigningAlgorithm.EDDSA, signingKeys);
+    if (config.es256Enabled()) {
+      keySets.put(SigningAlgorithm.ES256, new SigningKeyService(
+          signingKeyStore(config, kmsApiToken, "signing-keys-es256.json"),
+          SigningAlgorithm.ES256, ids, clock, config.retiredKeyRetention()));
+    }
     final RevocationService revocations = new RevocationService(
         new JsonStore<>(config.dataDir().resolve("revocations.json"), Revocations.class), clock);
     final AuditService audit = new AuditService(
@@ -82,11 +115,10 @@ public final class IdpServer {
 
     final TokenIssuer issuer = new TokenIssuer(
         signingKeys, ids, clock, config.issuer(), config.audience(), config.tokenTtl());
-    final ApiHandlers handlers = new ApiHandlers(config, directory, signingKeys, revocations, audit,
+    final ApiHandlers handlers = new ApiHandlers(config, directory, keySets, revocations, audit,
         issuer, new AdminAuthenticator(adminToken), OpenApiDocument.load(), clock);
     final Router router = handlers.router();
 
-    final HttpServer http = HttpServer.create(new InetSocketAddress(config.host(), config.port()), 0);
     http.createContext("/", router);
     http.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     return new IdpServer(http, config);
@@ -98,9 +130,10 @@ public final class IdpServer {
    * private keys are envelope-encrypted under a mini-kms key group and never written in the clear.
    */
   private static DocumentStore<SigningKeys> signingKeyStore(final ServerConfig config,
-                                                            final String kmsApiToken) {
+                                                            final String kmsApiToken,
+                                                            final String fileName) {
     final JsonStore<SigningKeys> file =
-        new JsonStore<>(config.dataDir().resolve("signing-keys.json"), SigningKeys.class);
+        new JsonStore<>(config.dataDir().resolve(fileName), SigningKeys.class);
     if (config.kmsEnabled() && kmsApiToken != null) {
       return KmsSigningKeyStore.overTcp(
           file, config.kmsHost(), config.kmsPort(), kmsApiToken, config.kmsKeyGroup());
@@ -123,7 +156,10 @@ public final class IdpServer {
     return httpServer.getAddress();
   }
 
-  /** @return the configuration this server was built from. */
+  /**
+   * @return the configuration this server runs with: the one it was built from, with the bound port
+   *     (and, when the issuer was derived rather than given, the issuer) filled in.
+   */
   public ServerConfig config() {
     return config;
   }

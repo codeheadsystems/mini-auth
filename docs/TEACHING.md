@@ -45,6 +45,7 @@ Find yourself in this table and start where it points.
 | **A homelab operator** | Docker, reverse proxies, the CLI. You don't want crypto theory first. | [`howto/run-the-whole-family.md`](howto/run-the-whole-family.md), then tutorials [`04`](tutorials/04-human-sso-end-to-end.md) and [`05`](tutorials/05-gate-a-no-auth-app.md). |
 | **A security student / threat-modeler** | OWASP-level vocabulary. You read the `security/` findings for fun. | [`concepts/secure-design-invariants.md`](concepts/secure-design-invariants.md) + the [`security/`](security/) track. |
 | **An architect** | System design. | You're already served by [`DIRECTION.md`](DIRECTION.md). |
+| **A developer of another project** (e.g. config-server) that should trust the family's machine tokens | Your own service's JWT verifier. | [`howto/use-mini-idp-as-an-external-issuer.md`](howto/use-mini-idp-as-an-external-issuer.md). |
 
 **Before any deep dive, read [`concepts/honest-seams.md`](concepts/honest-seams.md).** It lists the
 handful of paths that are *designed but not yet wired* — so a lab never sends you to trace something

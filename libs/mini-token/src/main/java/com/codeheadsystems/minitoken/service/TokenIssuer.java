@@ -43,7 +43,8 @@ public final class TokenIssuer {
    * @param ids         the random {@code jti} generator.
    * @param clock       the clock for time claims.
    * @param issuer      the {@code iss} value (this IDP's issuer URL).
-   * @param audience    the {@code aud} value (the mini-kms audience).
+   * @param audience    the default {@code aud} value (the mini-kms audience), used when the caller
+   *                    does not name one.
    * @param tokenTtl    the token lifetime ({@code exp - iat}).
    */
   public TokenIssuer(final SigningKeyService signingKeys, final RandomIds ids, final Clock clock,
@@ -64,6 +65,25 @@ public final class TokenIssuer {
    * @return the serialized token plus the metadata the {@code /oauth/token} response needs.
    */
   public IssuedToken issue(final String subject, final Authorization authorization) {
+    return issue(subject, authorization, audience, signingKeys);
+  }
+
+  /**
+   * Issue a token for an explicit audience, signed by an explicit key set.
+   *
+   * <p>This is how one issuer serves several relying parties: the caller (which has already checked
+   * that the client may ask for {@code tokenAudience}) picks the audience and the key set whose
+   * algorithm that audience accepts — e.g. ES256 for a verifier without EdDSA support. The JWS
+   * header's {@code alg} and {@code kid} come from that key set's active signer.
+   *
+   * @param subject       the token subject ({@code sub}).
+   * @param authorization the grants/control-plane authority the token carries; never null.
+   * @param tokenAudience the {@code aud} value for this token.
+   * @param keys          the signing-key set to sign with.
+   * @return the serialized token plus the metadata the {@code /oauth/token} response needs.
+   */
+  public IssuedToken issue(final String subject, final Authorization authorization,
+                           final String tokenAudience, final SigningKeyService keys) {
     final Instant now = clock.instant();
     final Instant expiry = now.plus(tokenTtl);
     final String jti = ids.newJti();
@@ -71,7 +91,7 @@ public final class TokenIssuer {
     final JwtClaims claims = new JwtClaims(
         issuer,
         subject,
-        audience,
+        tokenAudience,
         now.getEpochSecond(),
         now.getEpochSecond(),
         expiry.getEpochSecond(),
@@ -79,8 +99,9 @@ public final class TokenIssuer {
         GrantsClaim.from(authorization),
         null /* cnf placeholder: not populated yet */);
 
-    final Signer signer = signingKeys.currentSigner();
-    final String compact = Jws.sign(JwsHeader.forKid(signer.kid()), claims, signer.privateKey());
+    final Signer signer = keys.currentSigner();
+    final String compact = Jws.sign(
+        JwsHeader.forKid(signer.algorithm(), signer.kid()), claims, signer.privateKey());
 
     return new IssuedToken(
         compact,
@@ -89,6 +110,11 @@ public final class TokenIssuer {
         scopeOf(authorization),
         jti,
         expiry.getEpochSecond());
+  }
+
+  /** @return the default {@code aud} value. */
+  public String defaultAudience() {
+    return audience;
   }
 
   /**

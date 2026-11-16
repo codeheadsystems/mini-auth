@@ -2,6 +2,7 @@ package com.codeheadsystems.miniidp.directory;
 
 import com.codeheadsystems.minitoken.auth.Authorization;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The seam by which mini-idp resolves a client's credentials and grants <b>from mini-directory</b>,
@@ -32,7 +33,20 @@ public interface ServiceAccountDirectory {
    *
    * @param subject       the principal id (the token {@code sub}).
    * @param authorization the grants/control-plane authority the token's {@code grants} claim carries.
+   * @param audiences     the extra audiences this client may request per token (RFC 8707
+   *                      {@code resource} / {@code audience}), beyond the issuer's default audience,
+   *                      which every client may always get. Never null.
    */
-  record ResolvedClient(String subject, Authorization authorization) {
+  record ResolvedClient(String subject, Authorization authorization, Set<String> audiences) {
+
+    /** Defensive copy; null means "no extra audiences". */
+    public ResolvedClient {
+      audiences = audiences == null ? Set.of() : Set.copyOf(audiences);
+    }
+
+    /** A client with no extra audiences (only the issuer default). */
+    public ResolvedClient(final String subject, final Authorization authorization) {
+      this(subject, authorization, Set.of());
+    }
   }
 }

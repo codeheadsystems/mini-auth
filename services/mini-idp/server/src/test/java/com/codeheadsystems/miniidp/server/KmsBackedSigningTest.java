@@ -120,6 +120,64 @@ class KmsBackedSigningTest {
     assertTrue(verifier.verify(accessToken, rotatedJwks, jti -> false).valid(), "old token still verifies");
   }
 
+  @Test
+  void es256KeysAreKmsWrappedTooAndSurviveARestart(@TempDir final Path esDir) throws Exception {
+    final InMemoryServiceAccountDirectory directory = new InMemoryServiceAccountDirectory()
+        .add(CLIENT, SECRET, Authorization.none(), java.util.Set.of("config-server"));
+    final String[] args = {
+        "--port", "0", "--data-dir", esDir.toString(), "--issuer", ISSUER, "--audience", AUDIENCE,
+        "--audience-algorithm", "config-server=ES256",
+        "--kms-tcp", "127.0.0.1:" + kms.boundTcpPort(), "--kms-key-group", "idp-signing"};
+    IdpServer es = IdpServer.create(ServerConfig.resolve(args, Map.of()), ADMIN_TOKEN, KMS_API_TOKEN,
+        directory, Clock.systemUTC());
+    es.start();
+    final String firstToken;
+    try {
+      firstToken = es256Token(es);
+    } finally {
+      es.stop();
+    }
+    final SigningKeys onDisk = MAPPER.readValue(
+        Files.readAllBytes(esDir.resolve("signing-keys-es256.json")), SigningKeys.class);
+    assertFalse(onDisk.keys().isEmpty());
+    assertTrue(onDisk.keys().stream()
+            .allMatch(k -> k.privatePkcs8Base64().startsWith(KmsSigningKeyStore.WRAPPED_PREFIX)),
+        "every ES256 signing key must be wrapped under mini-kms on disk");
+
+    // Restart: the wrapped ES256 key is unwrapped through mini-kms and keeps signing under its kid.
+    es = IdpServer.create(ServerConfig.resolve(args, Map.of()), ADMIN_TOKEN, KMS_API_TOKEN,
+        directory, Clock.systemUTC());
+    es.start();
+    try {
+      final String secondToken = es256Token(es);
+      final com.codeheadsystems.minitoken.token.Jws.Parts parts =
+          com.codeheadsystems.minitoken.token.Jws.split(secondToken);
+      final String kid = com.codeheadsystems.minitoken.token.Jws.parseHeader(parts).keyId();
+      assertEquals(com.codeheadsystems.minitoken.token.Jws.parseHeader(
+          com.codeheadsystems.minitoken.token.Jws.split(firstToken)).keyId(), kid);
+      final JwkSet jwks = MAPPER.readValue(client.send(HttpRequest.newBuilder(URI.create(
+              "http://127.0.0.1:" + es.address().getPort() + "/.well-known/jwks.json")).GET().build(),
+          BodyHandlers.ofString()).body(), JwkSet.class);
+      final var jwk = jwks.keys().stream().filter(k -> kid.equals(k.keyId())).findFirst().orElseThrow();
+      assertEquals("EC", jwk.keyType());
+      assertTrue(com.codeheadsystems.minitoken.token.Jws.verifySignature(parts, jwk.toPublicKey(),
+          com.codeheadsystems.minitoken.crypto.SigningAlgorithm.ES256));
+    } finally {
+      es.stop();
+    }
+  }
+
+  private String es256Token(final IdpServer server) throws Exception {
+    final String form = "grant_type=client_credentials&client_id=" + CLIENT + "&client_secret=" + SECRET
+        + "&resource=config-server";
+    final HttpResponse<String> response = client.send(HttpRequest.newBuilder(
+            URI.create("http://127.0.0.1:" + server.address().getPort() + "/oauth/token"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(BodyPublishers.ofString(form)).build(), BodyHandlers.ofString());
+    assertEquals(200, response.statusCode(), response.body());
+    return MAPPER.readTree(response.body()).get("access_token").asString();
+  }
+
   private HttpResponse<String> requestToken() throws Exception {
     final String form = "grant_type=client_credentials&client_id=" + CLIENT + "&client_secret=" + SECRET;
     return client.send(HttpRequest.newBuilder(URI.create(baseUrl + "/oauth/token"))

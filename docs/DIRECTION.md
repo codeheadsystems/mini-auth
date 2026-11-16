@@ -15,6 +15,7 @@ understand the whole, read this one.
 - [Runtime relationships (what the names don't show)](#runtime-relationships)
 - [Wrapping the signing keys under mini-kms](#wrapping-the-signing-keys-under-mini-kms)
 - [Resolved design decision: the client registry folded into mini-directory](#resolved-design-decision-the-client-registry-folded-into-mini-directory)
+- [mini-idp as an issuer for relying parties outside the family (config-server)](#mini-idp-as-an-issuer-for-relying-parties-outside-the-family-config-server)
 - [Toward a mini-common library](#toward-a-mini-common-library)
 - [Roadmap](#roadmap)
 - [Build aggregation](#build-aggregation)
@@ -60,7 +61,7 @@ Every mini, its one-line purpose, whether it is a library or a service, and its 
 | Mini | Purpose | Type | Status |
 | --- | --- | --- | --- |
 | **mini-kms** | Envelope encryption / KMS: rotatable keys, the eventual vault that wraps other services' signing keys. | service (+ core/client libs) | **shipping** |
-| **mini-idp** | Machine-to-machine identity: OAuth2 client-credentials → Ed25519 JWT, JWKS. | service (+ core lib) | **shipping** |
+| **mini-idp** | Machine-to-machine identity: OAuth2 client-credentials → Ed25519 JWT (ES256 per mapped audience), JWKS, OpenID/RFC 8414 discovery. | service (+ core lib) | **shipping** |
 | **mini-token** | The shared token plane: JWS, JWKS, signing-key lifecycle, rotation, revocation, audit, the `grants` claim contract, a persistence SPI, the offline `JwsClaimsVerifier`, AND the shared browser-SSO `SessionService` (so mini-oidc and mini-gateway share one session store). | library | **shipping** |
 | **mini-policy** | Generalized authorization decision function: `(principal, action, resource) → allow/deny`. Generalizes mini-kms's per-key-group key-authorization policy into one engine. | library | **shipping** (minimal engine; consumed by directory/oidc/gateway/kms — family-wide grant sourcing is future) |
 | **mini-oidc** | Human SSO / OpenID Provider: authorization-code + PKCE, ID + access + refresh tokens, /userinfo, browser SSO sessions, single logout, login/consent UI. Embeds **pk-auth** (passkeys + backup-code recovery), mints via **mini-token**, authorizes scopes via **mini-policy**, resolves users from **mini-directory**. | service | **shipping** |
@@ -314,6 +315,49 @@ dependency). See `services/mini-directory/README.md`.
 
 ---
 
+## mini-idp as an issuer for relying parties outside the family (config-server)
+
+mini-idp also issues tokens for **config-server** (`com.codeheadsystems:config-*`), a read-only
+configuration service that trusts external OIDC-style issuers. All of it is **additive**; mini-kms
+and the rest of the family see exactly the tokens they always did.
+
+- **Standard discovery.** The `idp-configuration` document is also served at
+  `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`, which is where
+  config-server (and most JOSE stacks) look for `issuer` + `jwks_uri`.
+- **Per-token audience.** A client may request an audience with RFC 8707 `resource` (or `audience`).
+  Without one it gets the default (`mini-kms`). Each service account carries an explicit audience
+  allowlist, stored in mini-directory as `token:audience` grants (no new directory schema; the
+  generic `(action, resource)` model already holds it). A token for one audience is not accepted by
+  a verifier expecting another.
+- **Per-audience algorithm.** config-server does not accept EdDSA, so an operator maps its audience
+  to **ES256** (`--audience-algorithm config-server=ES256`). mini-token gained a `SigningAlgorithm`
+  (EdDSA | ES256), EC P-256 keys/JWKs, and ES256 JWS signing (JDK `SHA256withECDSAinP1363Format`, so
+  the signature is the raw `R || S` JWS requires); `SigningKeyService` became per-algorithm, and
+  mini-idp runs a second, independent ES256 key set (`signing-keys-es256.json`) only when some
+  audience is mapped to it — same rotation/retention, same at-rest protection (KMS-wrapped with
+  `--kms-*`), published in the same JWKS. **Ed25519 stays the family default**, and mini-token's own
+  verifiers (`TokenVerifier`, `JwsClaimsVerifier`) still accept only EdDSA: ES256 exists for
+  verifiers outside the family.
+- **Runnable without mini-directory.** For other projects' integration tests, mini-idp can seed an
+  in-memory service-account directory from configuration (`MINIIDP_SERVICE_ACCOUNTS` /
+  `--service-accounts-file`). Two ways to run it: the **container image**
+  `ghcr.io/codeheadsystems/mini-idp:<version>` (published on a `mini-idp-vX.Y.Z` tag) and the
+  in-process **`:services:mini-idp:testkit`** `TestIdp` (port 0, issuer derived from the bound
+  port). The testkit is not yet on Maven Central: mini-auth has no publishing setup, and publishing
+  it means publishing its whole dependency chain (mini-idp server/core, mini-token, mini-kms
+  client/core). That is the open follow-up.
+- **The compatibility test** (`testkit`'s `ConfigServerCompatibilityTest`) verifies tokens the way
+  config-server does (Nimbus, discovery, its algorithm set and claim checks), so a change here that
+  would break config-server breaks the build. Nimbus is a **test-scope** dependency only; the family
+  still hand-rolls its JWS.
+- **Other relying parties.** Nothing here is config-server-specific: any project whose JOSE verifier
+  discovers keys and accepts ES256 can trust mini-idp the same way (pick an audience, map it to
+  ES256 if the verifier lacks EdDSA, allowlist callers, trust the exact issuer URL). The operator
+  and CI walkthrough is
+  [`howto/use-mini-idp-as-an-external-issuer.md`](howto/use-mini-idp-as-an-external-issuer.md).
+
+---
+
 ## Toward a `mini-common` library
 
 The two shipping services were written independently, so they each grew their own copy of the same
@@ -437,7 +481,7 @@ directory, so `settings.gradle.kts` includes them as:
 
 ```kotlin
 include("services:mini-kms:core"); include("services:mini-kms:server"); include("services:mini-kms:client")
-include("services:mini-idp:core"); include("services:mini-idp:server")
+include("services:mini-idp:core"); include("services:mini-idp:server"); include("services:mini-idp:testkit")
 include("services:mini-oidc"); include("services:mini-gateway"); include("services:mini-directory")
 include("services:mini-ca"); include("services:mini-console")      // both ship
 include("libs:mini-token"); include("libs:mini-policy")

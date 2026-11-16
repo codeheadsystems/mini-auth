@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -18,17 +19,29 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class InMemoryServiceAccountDirectory implements ServiceAccountDirectory {
 
-  private record Account(byte[] secret, Authorization authorization) {
+  private record Account(byte[] secret, Authorization authorization, Set<String> audiences) {
   }
 
   private static final byte[] DUMMY = "dummy-secret-for-uniform-timing".getBytes(StandardCharsets.UTF_8);
 
   private final Map<String, Account> accounts = new ConcurrentHashMap<>();
 
-  /** Add a service account. @return this, for fluent test setup. */
+  /** Add a service account (default audience only). @return this, for fluent test setup. */
   public InMemoryServiceAccountDirectory add(final String clientId, final String secret,
                                              final Authorization authorization) {
-    accounts.put(clientId, new Account(secret.getBytes(StandardCharsets.UTF_8), authorization));
+    return add(clientId, secret, authorization, Set.of());
+  }
+
+  /**
+   * Add a service account that may also request the given audiences per token.
+   *
+   * @return this, for fluent test setup.
+   */
+  public InMemoryServiceAccountDirectory add(final String clientId, final String secret,
+                                             final Authorization authorization,
+                                             final Set<String> audiences) {
+    accounts.put(clientId, new Account(secret.getBytes(StandardCharsets.UTF_8), authorization,
+        Set.copyOf(audiences)));
     return this;
   }
 
@@ -42,7 +55,7 @@ public final class InMemoryServiceAccountDirectory implements ServiceAccountDire
       return Optional.empty();
     }
     return MessageDigest.isEqual(account.secret(), presented)
-        ? Optional.of(new ResolvedClient(clientId, account.authorization()))
+        ? Optional.of(new ResolvedClient(clientId, account.authorization(), account.audiences()))
         : Optional.empty();
   }
 }

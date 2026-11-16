@@ -3,8 +3,9 @@ info:
   title: mini-idp
   version: "1.0.0"
   description: |
-    **mini-idp** is a small identity provider. It issues short-lived Ed25519-signed JWT access
-    tokens via the OAuth 2.0 client-credentials grant, and publishes its public signing keys (JWKS)
+    **mini-idp** is a small identity provider. It issues short-lived signed JWT access
+    tokens (Ed25519 by default; ES256 for audiences an operator maps to it) via the OAuth 2.0
+    client-credentials grant, and publishes its public signing keys (JWKS)
     so a verifier (the companion **mini-kms** service) can validate tokens **offline**. Service
     accounts (the OAuth clients) are **not** managed here — they live in **mini-directory**, the
     family's single source of service-account identity; mini-idp resolves a client's credentials and
@@ -17,10 +18,25 @@ info:
     cleanly onto mini-kms's `Principal` / `KeyOperation` model. (To create or manage clients, use
     mini-directory's `/admin/service-accounts` API.)
 
+    ## Audiences and algorithms (per token)
+    By default a token carries the configured default audience (`mini-kms`) and is signed with
+    `EdDSA` (Ed25519), exactly as always. A client may instead ask for another audience with the
+    RFC 8707 `resource` parameter (or the equivalent `audience` parameter); it must be on that
+    client's allowlist (`token:audience` grants in mini-directory, or `audiences` in the seed), else
+    `400 invalid_target`. The operator can map an audience to `ES256` (ECDSA P-256), e.g. for
+    config-server, whose JOSE stack does not accept EdDSA; such tokens are signed by a separate
+    ES256 key set published in the same JWKS.
+
+    ## Discovery
+    The same document is served at `/.well-known/openid-configuration` (OpenID Connect Discovery
+    1.0), `/.well-known/oauth-authorization-server` (RFC 8414) and `/.well-known/idp-configuration`.
+
     ## Token verification (what a verifier does)
-    1. Fetch `GET /.well-known/jwks.json` and cache it.
+    1. Fetch `GET /.well-known/jwks.json` (or discover it via `jwks_uri`) and cache it.
     2. For a presented token, read the JWS header `kid`, select the matching JWK, and verify the
-       `EdDSA` (Ed25519) signature over `base64url(header) "." base64url(payload)`.
+       signature over `base64url(header) "." base64url(payload)` with the algorithm the verifier
+       expects for that key: `EdDSA` for `OKP`/`Ed25519` keys, `ES256` for `EC`/`P-256` keys (raw
+       64-byte `R || S`). Never let the token's own `alg` choose the verification algorithm.
     3. Validate `iss`, `aud`, and the `nbf`/`exp` time window.
     4. Optionally poll `GET /admin/revocations` and reject any token whose `jti` is listed.
     5. Map `sub` → `Principal.id`, `grants.control` → `Principal.admin`, and each
@@ -49,6 +65,11 @@ paths:
         `client_secret_post` — or via HTTP Basic — `client_secret_basic`) and returns a signed JWT.
         On any authentication failure a single generic `invalid_client` error is returned with no
         detail distinguishing an unknown client from a wrong secret (no credential oracle).
+
+        The token's audience is the default unless the client names one with `resource` or
+        `audience`; a named audience other than the default must be on the client's allowlist,
+        else `400 invalid_target` (checked only after the client authenticated). The audience
+        selects the signing algorithm (`EdDSA` unless the operator mapped it to `ES256`).
       security:
         - clientSecretBasic: []
         - {}
@@ -72,6 +93,15 @@ paths:
                 scope:
                   type: string
                   description: Optional and currently advisory; granted scope is determined by the client's stored grants.
+                resource:
+                  type: string
+                  description: |
+                    RFC 8707 resource indicator: the audience (`aud`) this token is for, e.g.
+                    `config-server`. Omit for the default audience. Must be the default or on the
+                    client's audience allowlist. One value per request.
+                audience:
+                  type: string
+                  description: Same as `resource`; if both are sent they must be equal.
       responses:
         "200":
           description: A signed access token.
@@ -80,7 +110,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/TokenResponse"
         "400":
-          description: Missing or unsupported grant.
+          description: |
+            Missing or unsupported grant (`unsupported_grant_type`), or a requested audience the
+            client may not have (`invalid_target`).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -110,6 +142,33 @@ paths:
       tags: [oauth]
       summary: Discovery document
       description: Issuer, token endpoint, and JWKS URI, plus supported grant/auth/alg values.
+      responses:
+        "200":
+          description: The discovery document.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DiscoveryDocument" }
+
+  /.well-known/openid-configuration:
+    get:
+      tags: [oauth]
+      summary: Discovery document (OpenID Connect Discovery 1.0 location)
+      description: |
+        The same document as `/.well-known/idp-configuration`, at the standard location verifiers
+        such as config-server fetch (`<issuer>/.well-known/openid-configuration`). `issuer` equals
+        every token's `iss` exactly; `jwks_uri` names the JWKS.
+      responses:
+        "200":
+          description: The discovery document.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DiscoveryDocument" }
+
+  /.well-known/oauth-authorization-server:
+    get:
+      tags: [oauth]
+      summary: Discovery document (RFC 8414 location)
+      description: The same document as `/.well-known/openid-configuration`.
       responses:
         "200":
           description: The discovery document.
@@ -170,8 +229,9 @@ paths:
       tags: [admin]
       summary: Rotate the signing key
       description: |
-        Activates a fresh Ed25519 signing key. The previous key is retired but stays published in
-        the JWKS until every token it could have signed has expired.
+        Activates a fresh signing key for every algorithm in use (Ed25519 always; ES256 when an
+        audience is mapped to it). Each previous key is retired but stays published in the JWKS
+        until every token it could have signed has expired.
       security:
         - adminBearer: []
       responses:
@@ -182,7 +242,13 @@ paths:
               schema:
                 type: object
                 properties:
-                  activeKid: { type: string }
+                  activeKid:
+                    type: string
+                    description: The new active Ed25519 (EdDSA) key id.
+                  activeKids:
+                    type: object
+                    description: The new active key id per JWS algorithm, e.g. `{"EdDSA":"…","ES256":"…"}`.
+                    additionalProperties: { type: string }
         "401":
           description: Missing or invalid admin token.
           content:
@@ -311,7 +377,9 @@ components:
           description: The clientId. Maps to mini-kms `Principal.id`.
         aud:
           type: string
-          description: The intended audience (the mini-kms service).
+          description: |
+            The intended audience: the configured default (the mini-kms service) unless the client
+            requested another allowlisted audience (`resource` / `audience`), e.g. `config-server`.
         iat:
           type: integer
           description: Issued-at (epoch seconds).
@@ -364,15 +432,21 @@ components:
 
     Jwk:
       type: object
-      description: An Ed25519 public key in JWK form (RFC 8037).
+      description: |
+        A public signing key in JWK form: Ed25519 (`kty=OKP`, RFC 8037) or, when ES256 is in use,
+        EC P-256 (`kty=EC`, RFC 7518 §6.2).
       properties:
-        kty: { type: string, enum: [OKP] }
-        crv: { type: string, enum: [Ed25519] }
+        kty: { type: string, enum: [OKP, EC] }
+        crv: { type: string, enum: [Ed25519, P-256] }
         x:
           type: string
-          description: The raw 32-byte public key, base64url (unpadded).
+          description: |
+            Ed25519 - the raw 32-byte public key; EC - the 32-byte x coordinate. base64url (unpadded).
+        y:
+          type: string
+          description: EC only - the 32-byte y coordinate, base64url (unpadded).
         use: { type: string, enum: [sig] }
-        alg: { type: string, enum: [EdDSA] }
+        alg: { type: string, enum: [EdDSA, ES256] }
         kid: { type: string }
       required: [kty, crv, x, kid]
 

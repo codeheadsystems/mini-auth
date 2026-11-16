@@ -16,8 +16,15 @@ verifiers: they just re-read the JWKS.
 ```bash
 # admin token via env/file, never argv
 curl -fsS -X POST http://127.0.0.1:8455/admin/keys/rotate -H "Authorization: Bearer $MINIIDP_ADMIN_TOKEN"
-# => { "activeKid": "k_<new>" }
+# => { "activeKid": "k_<new EdDSA>", "activeKids": { "EdDSA": "k_<new EdDSA>" } }
 ```
+
+If some audience is mapped to ES256 (`--audience-algorithm config-server=ES256`), mini-idp keeps a
+second, independent ES256 key set and one call rotates **both**:
+`"activeKids": { "EdDSA": "k_...", "ES256": "k_..." }`. Each set keeps its own retired keys in the
+same JWKS, so the steps below apply per algorithm. A relying party outside the family (for example
+config-server, verifying with Nimbus) finds the new ES256 `kid` by refetching the JWKS; see
+[`use-mini-idp-as-an-external-issuer.md`](use-mini-idp-as-an-external-issuer.md).
 
 Confirm the **old** key is still published (so in-flight tokens verify) and a **new** active key
 appears:

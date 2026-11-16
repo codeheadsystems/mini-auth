@@ -97,7 +97,7 @@ mini-auth/
 ├── docs/DIRECTION.md
 ├── services/                    # deployable front doors
 │   ├── mini-kms/   {core, server, client}   (shipping)
-│   ├── mini-idp/   {core, server}           (shipping)
+│   ├── mini-idp/   {core, server, testkit}  (shipping; testkit = embeddable TestIdp + config-server compat test)
 │   ├── mini-oidc/                           (shipping; human SSO / OpenID Provider, embeds pk-auth)
 │   ├── mini-gateway/                        (shipping; forward-auth for a reverse proxy)
 │   ├── mini-directory/                      (shipping; identity source of truth; mini-idp reads service accounts from it)
@@ -117,7 +117,7 @@ mini-auth/
 | Module | Project path | Type | Status |
 | --- | --- | --- | --- |
 | mini-kms | `:services:mini-kms:core/server/client` | service | **shipping** (§ below) |
-| mini-idp | `:services:mini-idp:core/server` | service | **shipping** (§ below) |
+| mini-idp | `:services:mini-idp:core/server/testkit` | service | **shipping** (§ below) |
 | mini-oidc | `:services:mini-oidc` | service (application) | **shipping** (§ below) — embeds pk-auth |
 | mini-gateway | `:services:mini-gateway` | service (application) | **shipping** (§ below) |
 | mini-directory | `:services:mini-directory` | service (application) | **shipping** (§ below) |
@@ -308,6 +308,15 @@ services/mini-idp/server/build/install/server/bin/server --port 8455 --data-dir 
   **envelope-wrapped under mini-kms** so no plaintext key touches disk (the recursive integration;
   see the mini-kms section and `docs/DIRECTION.md`). Rotation (mini-token's `service/SigningKeyService`)
   keeps retired keys in the JWKS (`retiredKeyRetention`, = 2× token TTL) so in-flight tokens verify.
+- **Per-token audience + ES256 (additive, for config-server).** Clients may request an audience with
+  RFC 8707 `resource` / `audience`, checked against the account's allowlist (`token:audience` grants
+  in mini-directory; `audiences` in the seed) → `400 invalid_target`. `--audience-algorithm
+  AUD=ES256` signs that audience's tokens with a separate ES256 key set (`signing-keys-es256.json`,
+  same rotation/KMS wrapping) published in the same JWKS; the default audience stays EdDSA.
+  Discovery is also served at `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`.
+  `MINIIDP_SERVICE_ACCOUNTS` / `--service-accounts-file` seed an in-memory directory instead of
+  `--directory-url` (the container image, `services/mini-idp/docker/`, and `testkit`'s `TestIdp`).
+  `testkit`'s `ConfigServerCompatibilityTest` (Nimbus, test scope) must stay green.
 - **Conventions.** `core` stays HTTP-free (composition root is `server/IdpServer`). The token
   endpoint returns one generic `invalid_client` for any auth failure. Admin token via
   `resolveAdminToken`. **The OpenAPI spec is the contract** — `OpenApiContractTest` fails if a
