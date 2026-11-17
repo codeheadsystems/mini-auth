@@ -19,11 +19,16 @@ curl -fsS -X POST http://127.0.0.1:8455/admin/keys/rotate -H "Authorization: Bea
 # => { "activeKid": "k_<new EdDSA>", "activeKids": { "EdDSA": "k_<new EdDSA>" } }
 ```
 
+mini-idp **pre-publishes the next key**: the JWKS always holds the active key, the next key (not yet
+signing) and recently retired keys. Rotation promotes the next key and publishes a fresh one, so the
+"new" kid was already in every verifier's cached JWKS before the rotation. A verifier never has to
+refetch after a single rotation; only two rotations inside its cache period make it refetch.
+
 If some audience is mapped to ES256 (`--audience-algorithm config-server=ES256`), mini-idp keeps a
 second, independent ES256 key set and one call rotates **both**:
 `"activeKids": { "EdDSA": "k_...", "ES256": "k_..." }`. Each set keeps its own retired keys in the
 same JWKS, so the steps below apply per algorithm. A relying party outside the family (for example
-config-server, verifying with Nimbus) finds the new ES256 `kid` by refetching the JWKS; see
+config-server, verifying with Nimbus) already has the new ES256 `kid` in its cached JWKS; see
 [`use-mini-idp-as-an-external-issuer.md`](use-mini-idp-as-an-external-issuer.md).
 
 Confirm the **old** key is still published (so in-flight tokens verify) and a **new** active key
@@ -32,10 +37,11 @@ appears:
 ```bash
 curl -fsS http://127.0.0.1:8455/.well-known/jwks.json \
   | python3 -c 'import sys,json;print([k["kid"] for k in json.load(sys.stdin)["keys"]])'
-# before: ['k_OLD']        after: ['k_OLD', 'k_NEW']
+# before: ['k_OLD', 'k_NEW']        after: ['k_OLD', 'k_NEW', 'k_NEXT']
 ```
 
-New tokens are signed with `k_NEW`; tokens signed with `k_OLD` keep verifying until `k_OLD` ages out
+New tokens are signed with `k_NEW` (published since the previous rotation), `k_NEXT` waits for the
+next rotation; tokens signed with `k_OLD` keep verifying until `k_OLD` ages out
 of the JWKS (then it's dropped). No verifier changes are needed.
 
 ## mini-oidc

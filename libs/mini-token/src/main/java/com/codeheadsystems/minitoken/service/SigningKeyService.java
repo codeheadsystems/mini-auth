@@ -29,6 +29,16 @@ import java.util.List;
  * file-backed implementation should restrict it to owner-only ({@code 0600}). All methods are
  * {@code synchronized}; rotation is rare and signing is cheap, so a single lock is adequate.
  *
+ * <p><b>Pre-published next key (opt-in).</b> With {@code prePublishNextKey}, the set also holds a
+ * <b>next</b> key: generated ahead of time and published in the JWKS, but not yet signing. Rotation
+ * promotes it to active and generates a fresh next key. So the kid a token is signed with after a
+ * rotation has been in the JWKS since the <em>previous</em> rotation (or startup), and a verifier
+ * holding a cached JWKS already has it: it never meets an unknown kid right after a rotation, which
+ * matters when its JWKS refetch is rate-limited (Nimbus, as config-server uses it, refetches at most
+ * twice per 30 seconds). Only two rotations within one verifier cache period still force a refetch.
+ * A next key is persisted like the others, with {@code active=false} and {@code retiredAt=null}, so
+ * the document shape is unchanged; it is never pruned (pruning only drops retired keys).
+ *
  * <p><b>One service per algorithm.</b> An issuer that signs with both Ed25519 and ES256 (mini-idp,
  * when an audience is mapped to ES256) runs two of these over two stores, so each algorithm has its
  * own active key, kid, rotation and retention, and the existing Ed25519 file is untouched. The
@@ -42,6 +52,7 @@ public final class SigningKeyService {
   private final RandomIds ids;
   private final Clock clock;
   private final Duration retiredKeyRetention;
+  private final boolean prePublishNextKey;
   private final List<SigningKeyRecord> keys = new ArrayList<>();
   private String activeKid;
 
@@ -65,6 +76,21 @@ public final class SigningKeyService {
    */
   public SigningKeyService(final DocumentStore<SigningKeys> store, final SigningAlgorithm algorithm,
                            final RandomIds ids, final Clock clock, final Duration retiredKeyRetention) {
+    this(store, algorithm, ids, clock, retiredKeyRetention, false);
+  }
+
+  /**
+   * @param store               the backing JSON store, holding only keys of {@code algorithm}.
+   * @param algorithm           the algorithm every key in this set signs with.
+   * @param ids                 the random kid generator.
+   * @param clock               the clock for created/retired timestamps and pruning.
+   * @param retiredKeyRetention how long a retired key stays published; must exceed the token TTL.
+   * @param prePublishNextKey   keep a published-but-not-yet-signing next key, so the kid that signs
+   *                            after a rotation was already in the JWKS before it (see class doc).
+   */
+  public SigningKeyService(final DocumentStore<SigningKeys> store, final SigningAlgorithm algorithm,
+                           final RandomIds ids, final Clock clock, final Duration retiredKeyRetention,
+                           final boolean prePublishNextKey) {
     if (algorithm == null) {
       throw new IllegalArgumentException("algorithm must not be null");
     }
@@ -80,6 +106,8 @@ public final class SigningKeyService {
     this.ids = ids;
     this.clock = clock;
     this.retiredKeyRetention = retiredKeyRetention;
+    this.prePublishNextKey = prePublishNextKey;
+    boolean changed = false;
     if (store.exists()) {
       final SigningKeys loaded = store.load();
       keys.addAll(loaded.keys());
@@ -88,6 +116,14 @@ public final class SigningKeyService {
     if (activeKid == null || findActive() == null) {
       // First run (or an empty/garbled set): mint the initial signing key.
       generateActive();
+      changed = true;
+    }
+    if (prePublishNextKey && findNext() == null) {
+      // First run, or a set written before pre-publication was turned on: publish a next key now.
+      keys.add(newKey(false));
+      changed = true;
+    }
+    if (changed) {
       persist();
     }
   }
@@ -102,7 +138,8 @@ public final class SigningKeyService {
   }
 
   /**
-   * The published JWK Set: every key still retained (active + not-yet-expired retired keys).
+   * The published JWK Set: every key still retained (active, the next key if pre-published, and
+   * not-yet-expired retired keys).
    *
    * <p>Pruning of long-retired keys happens here lazily, so the served set never advertises a key
    * that can no longer be backing any live token.
@@ -117,22 +154,45 @@ public final class SigningKeyService {
   }
 
   /**
-   * Rotate the signing key: retire the current active key and activate a fresh one.
+   * Rotate the signing key: retire the current active key and activate the next one. The next key
+   * is the pre-published one if there is one (it is already in the JWKS), else a fresh key. With
+   * {@code prePublishNextKey}, a new next key is then generated and published.
    *
    * @return the new active kid.
    */
   public synchronized String rotate() {
     final long now = clock.instant().getEpochSecond();
+    final SigningKeyRecord next = findNext();
     final List<SigningKeyRecord> updated = new ArrayList<>();
     for (final SigningKeyRecord key : keys) {
-      updated.add(key.active() ? key.retiredAt(now) : key);
+      if (key.active()) {
+        updated.add(key.retiredAt(now));
+      } else if (key == next) {
+        updated.add(key.activated());
+      } else {
+        updated.add(key);
+      }
     }
     keys.clear();
     keys.addAll(updated);
-    generateActive();
+    if (next != null) {
+      // Promote even when pre-publication is off: the key is already published, so use it.
+      activeKid = next.kid();
+    } else {
+      generateActive();
+    }
+    if (prePublishNextKey) {
+      keys.add(newKey(false));
+    }
     pruneExpiredRetired();
     persist();
     return activeKid;
+  }
+
+  /** @return the pre-published next kid, or null when there is none. */
+  public synchronized String nextKid() {
+    final SigningKeyRecord next = findNext();
+    return next == null ? null : next.kid();
   }
 
   /** @return the algorithm every key in this set signs with. */
@@ -146,17 +206,31 @@ public final class SigningKeyService {
   }
 
   private void generateActive() {
+    final SigningKeyRecord key = newKey(true);
+    keys.add(key);
+    activeKid = key.kid();
+  }
+
+  private SigningKeyRecord newKey(final boolean active) {
     final KeyPair pair = algorithm.generate();
-    final String kid = ids.newKid();
     // PKCS#8 / SPKI DER, base64 — the same at-rest encoding for every algorithm.
-    keys.add(new SigningKeyRecord(
-        kid,
+    return new SigningKeyRecord(
+        ids.newKid(),
         Base64.getEncoder().encodeToString(pair.getPrivate().getEncoded()),
         Base64.getEncoder().encodeToString(pair.getPublic().getEncoded()),
-        true,
+        active,
         clock.instant().getEpochSecond(),
-        null));
-    activeKid = kid;
+        null);
+  }
+
+  /** The next key: not active and never retired. At most one exists. */
+  private SigningKeyRecord findNext() {
+    for (final SigningKeyRecord key : keys) {
+      if (!key.active() && key.retiredAt() == null) {
+        return key;
+      }
+    }
+    return null;
   }
 
   private void pruneExpiredRetired() {

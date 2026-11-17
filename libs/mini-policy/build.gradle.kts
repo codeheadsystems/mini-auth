@@ -17,7 +17,13 @@
 
 plugins {
     id("miniauth.library-conventions")
+    id("miniauth.publish-conventions")
 }
+
+description = "The mini-auth decision engine: (principal, action, resource) to allow/deny"
+
+// Published to Maven Central; also the jar name (unique across the family). See RELEASING.md.
+miniPublish { artifactId = "mini-policy" }
 
 dependencies {
     // JUnit 5 (jupiter + launcher) is supplied by the convention plugin.

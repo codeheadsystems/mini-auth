@@ -338,14 +338,23 @@ and the rest of the family see exactly the tokens they always did.
   `--kms-*`), published in the same JWKS. **Ed25519 stays the family default**, and mini-token's own
   verifiers (`TokenVerifier`, `JwsClaimsVerifier`) still accept only EdDSA: ES256 exists for
   verifiers outside the family.
-- **Runnable without mini-directory.** For other projects' integration tests, mini-idp can seed an
-  in-memory service-account directory from configuration (`MINIIDP_SERVICE_ACCOUNTS` /
-  `--service-accounts-file`). Two ways to run it: the **container image**
-  `ghcr.io/codeheadsystems/mini-idp:<version>` (published on a `mini-idp-vX.Y.Z` tag) and the
-  in-process **`:services:mini-idp:testkit`** `TestIdp` (port 0, issuer derived from the bound
-  port). The testkit is not yet on Maven Central: mini-auth has no publishing setup, and publishing
-  it means publishing its whole dependency chain (mini-idp server/core, mini-token, mini-kms
-  client/core). That is the open follow-up.
+- **Pre-published next key.** mini-idp's key sets (both algorithms) publish the **next** signing
+  key in the JWKS before it signs anything (mini-token's `SigningKeyService`, opt-in, so mini-oidc
+  is unchanged). Rotation promotes it and publishes a fresh one, so the kid that signs after a
+  rotation is already in a verifier's cached JWKS. That matters for config-server, whose Nimbus
+  source refetches the JWKS at most twice per 30 seconds; only two rotations inside one cache period
+  still force a refetch. The next key is an ordinary record (`active=false`, `retiredAt=null`), so
+  the at-rest document and its mini-kms wrapping are unchanged.
+- **Runnable without mini-directory, from Maven Central.** For other projects' integration tests,
+  **`TestIdp`** (`:services:mini-idp:testkit`) runs the real server in-process (port 0, issuer
+  derived from the bound port, in-memory service accounts). It is published as
+  `com.codeheadsystems:mini-idp-testkit`, with its runtime dependency chain: `mini-idp-server`,
+  `mini-idp-core`, `mini-token`, `mini-kms-client`, `mini-kms-core`, `mini-policy` (one group, one
+  shared version, one Central Portal deployment; see `RELEASING.md` and "Publishing" below). A
+  zero-dependency local run can also seed the in-memory directory from configuration
+  (`MINIIDP_SERVICE_ACCOUNTS` / `--service-accounts-file`). A container image was considered and
+  dropped: the consumer (config) runs on the JVM, and an in-process issuer has no port mapping to
+  get wrong.
 - **The compatibility test** (`testkit`'s `ConfigServerCompatibilityTest`) verifies tokens the way
   config-server does (Nimbus, discovery, its algorithm set and claim checks), so a change here that
   would break config-server breaks the build. Nimbus is a **test-scope** dependency only; the family
@@ -507,6 +516,19 @@ precompiled script plugins, applied per-module by id:
 - `miniauth.library-conventions` — the above + `java-library` (the I/O-free `core`s, mini-token,
   mini-policy, the placeholders).
 - `miniauth.application-conventions` — the above + `application` (the runnable services).
+- `miniauth.publish-conventions` — layered on either: Maven Central publication (sources + javadoc
+  jars, POM, GPG signing), with an explicit per-module `miniPublish { artifactId = ... }`.
+
+**Publishing.** Adapted from config (which follows hofmann-elimination): the nmcp settings plugin
+aggregates every module applying `miniauth.publish-conventions` into one Central Portal deployment;
+the version is `gradle.properties`' SNAPSHOT unless a `vX.Y.Z` tag is on `HEAD`; the groupId is
+`mavenGroup` (`com.codeheadsystems`). Two mini-auth-specific twists: (1) the artifactId is explicit
+per module, because leaf names repeat (`core`, `server`, `client`) and the artifactId would
+otherwise default to them; (2) the Gradle `group` is **not** set to `com.codeheadsystems`, because
+two projects with the same group and name are one module to Gradle's dependency resolution, and
+`mini-idp:core` would evict `mini-kms:core` from mini-idp-server's classpath. Only mini-idp's
+testkit and its runtime chain are published; the release workflows (`release.yml`,
+`manual-release.yml`, `publish.yml`) and the steps are in `RELEASING.md`.
 
 Applying the conventions per-module (instead of a root `subprojects {}` block) keeps the empty
 grouping projects inert and makes each module's library-vs-service contract explicit in its own

@@ -8,7 +8,13 @@
 
 plugins {
     id("miniauth.application-conventions")
+    id("miniauth.publish-conventions")
 }
+
+description = "mini-idp, an OAuth 2.0 client-credentials token issuer (EdDSA/ES256 JWTs, JWKS, OpenID discovery)"
+
+// Published to Maven Central; also the jar name (unique across the family). See RELEASING.md.
+miniPublish { artifactId = "mini-idp-server" }
 
 dependencies {
     implementation(project(":services:mini-idp:core"))

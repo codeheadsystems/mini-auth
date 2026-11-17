@@ -9,10 +9,13 @@
 
 plugins {
     id("miniauth.library-conventions")
+    id("miniauth.publish-conventions")
 }
 
-// Unique jar name: three modules in the family are leaf-named after their role.
-base { archivesName = "mini-idp-testkit" }
+description = "mini-idp embedded for tests: the real token issuer in-process on a loopback port, with seeded service accounts (TestIdp)"
+
+// Published to Maven Central; also the jar name (unique across the family). See RELEASING.md.
+miniPublish { artifactId = "mini-idp-testkit" }
 
 dependencies {
     implementation(project(":services:mini-idp:server"))

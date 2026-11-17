@@ -16,7 +16,13 @@
 
 plugins {
     id("miniauth.library-conventions")
+    id("miniauth.publish-conventions")
 }
+
+description = "The mini-auth token plane: JWS/JWKS, EdDSA and ES256 signing keys with rotation, revocation, audit"
+
+// Published to Maven Central; also the jar name (unique across the family). See RELEASING.md.
+miniPublish { artifactId = "mini-token" }
 
 dependencies {
     // The JWKS document and JWT claim records are Jackson-bound, like mini-idp's.

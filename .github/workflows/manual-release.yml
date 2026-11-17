@@ -1,0 +1,57 @@
+name: manual release
+
+# Run from the Actions tab: tags the head of main with the next patch version and publishes it to
+# Maven Central. With no release tag yet, the first version is gradle.properties' version without
+# -SNAPSHOT. See RELEASING.md.
+#
+# A tag pushed with GITHUB_TOKEN does not trigger other workflows, so release.yml does not also
+# run for the tag created here; this workflow calls publish.yml itself.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main # always main, whatever ref the workflow was dispatched from
+          fetch-depth: 0
+
+      - name: Pick the next version and push its tag
+        id: version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          LATEST_TAG=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n 1)
+          if [ -z "$LATEST_TAG" ]; then
+            NEW_VERSION=$(grep '^version=' gradle.properties | cut -d= -f2)
+            NEW_VERSION=${NEW_VERSION%-SNAPSHOT}
+            echo "No release tag yet; using gradle.properties: $NEW_VERSION"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${LATEST_TAG#v}"
+            PATCH=${PATCH%%-*} # 3-rc.1 -> 3
+            NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+            echo "Latest tag $LATEST_TAG; next is $NEW_VERSION"
+          fi
+
+          NEW_TAG="v$NEW_VERSION"
+          git tag -a "$NEW_TAG" -m "Release $NEW_VERSION"
+          git push origin "$NEW_TAG"
+          echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: tag
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    secrets: inherit

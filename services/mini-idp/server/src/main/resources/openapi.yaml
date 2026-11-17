@@ -127,9 +127,10 @@ paths:
       tags: [jwks]
       summary: Public signing keys (JWK Set)
       description: |
-        The current public signing keys. During key rotation this set contains the freshly
-        activated key plus recently retired keys (overlapping `kid`s), so tokens signed just before
-        a rotation still verify until they expire.
+        The current public signing keys, per algorithm: the active key, the **next** key (published
+        before it signs anything, so a verifier's cached JWKS already holds the kid that signs after
+        the next rotation), and recently retired keys (so tokens signed before a rotation still
+        verify until they expire).
       responses:
         "200":
           description: The JWK Set.
@@ -229,9 +230,9 @@ paths:
       tags: [admin]
       summary: Rotate the signing key
       description: |
-        Activates a fresh signing key for every algorithm in use (Ed25519 always; ES256 when an
-        audience is mapped to it). Each previous key is retired but stays published in the JWKS
-        until every token it could have signed has expired.
+        For every algorithm in use (Ed25519 always; ES256 when an audience is mapped to it),
+        activates the pre-published next key and publishes a fresh next key. Each previous key is
+        retired but stays published in the JWKS until every token it could have signed has expired.
       security:
         - adminBearer: []
       responses:
@@ -468,9 +469,6 @@ components:
           type: array
           items: { type: string }
         token_endpoint_auth_methods_supported:
-          type: array
-          items: { type: string }
-        token_endpoint_auth_signing_alg_values_supported:
           type: array
           items: { type: string }
         id_token_signing_alg_values_supported:

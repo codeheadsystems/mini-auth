@@ -45,6 +45,9 @@ pluginManagement {
 plugins {
     // Apply the foojay-resolver plugin to allow automatic download of JDKs (matches the siblings).
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+    // Maven Central (Central Portal) publishing: every module applying miniauth.publish-conventions
+    // goes up as ONE aggregated deployment. See RELEASING.md.
+    id("com.gradleup.nmcp.settings") version "1.6.2"
 }
 
 rootProject.name = "mini-auth"
@@ -71,3 +74,42 @@ include("libs:mini-idp-client")
 include("libs:mini-ca-client")
 include("libs:mini-oidc-client")
 include("libs:mini-gateway-client")
+
+// --- Publishing ------------------------------------------------------------------------
+// Published to Maven Central (miniauth.publish-conventions): mini-idp's testkit and everything it
+// needs at runtime -- services:mini-idp:{testkit,server,core}, libs:mini-token,
+// services:mini-kms:{client,core}, libs:mini-policy. See RELEASING.md.
+
+nmcpSettings {
+    centralPortal {
+        username = System.getenv("CENTRAL_PORTAL_USERNAME")
+            ?: providers.gradleProperty("centralPortalUsername").orNull
+        password = System.getenv("CENTRAL_PORTAL_PASSWORD")
+            ?: providers.gradleProperty("centralPortalPassword").orNull
+    }
+}
+
+/*
+ * The released version comes from a vX.Y.Z (or vX.Y.Z-suffix) git tag on HEAD; otherwise
+ * gradle.properties' SNAPSHOT. Read once here; applied in beforeProject rather than in the root
+ * build's allprojects, which would run after this and win.
+ */
+val releaseTag = providers.exec {
+    commandLine("git", "describe", "--tags", "--exact-match", "HEAD")
+    isIgnoreExitValue = true
+}.standardOutput.asText.get().trim()
+
+if (releaseTag.startsWith("v")) {
+    val semver = Regex("^v(\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?)$").matchEntire(releaseTag)
+    if (semver != null) {
+        val tagVersion = semver.groupValues[1]
+        gradle.beforeProject {
+            version = tagVersion
+            if (this == rootProject) {
+                logger.lifecycle("Using version from Git tag: $tagVersion")
+            }
+        }
+    } else {
+        logger.warn("Git tag '$releaseTag' is not vX.Y.Z; keeping the version from gradle.properties")
+    }
+}

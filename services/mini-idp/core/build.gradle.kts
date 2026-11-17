@@ -10,11 +10,13 @@
 
 plugins {
     id("miniauth.library-conventions")
+    id("miniauth.publish-conventions")
 }
 
-// Unique jar name so this `core` and mini-kms's `core` (both `core.jar` by default) can coexist in
-// one service distribution — mini-idp:server now bundles mini-kms:core for the KMS key wrapping.
-base { archivesName = "mini-idp-core" }
+description = "mini-idp persistence: the atomic owner-only JSON document store"
+
+// Published to Maven Central; also the jar name (unique across the family). See RELEASING.md.
+miniPublish { artifactId = "mini-idp-core" }
 
 dependencies {
     // The shared token plane: the DocumentStore SPI JsonStore implements, plus the token types.

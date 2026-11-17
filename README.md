@@ -46,7 +46,7 @@ adds the connective tissue (`mini-token`, `mini-policy`) and the new human-facin
 | Mini | Purpose | Type | Status |
 | --- | --- | --- | --- |
 | [mini-kms](services/mini-kms) | Envelope-encryption KMS; the vault wrapping other services' signing keys. | service | **shipping** |
-| [mini-idp](services/mini-idp) | Machine identity: OAuth2 client-credentials → Ed25519 JWT (ES256 per mapped audience) + JWKS + OpenID/RFC 8414 discovery. Also a trusted issuer for projects outside the family, such as config-server ([how-to](docs/howto/use-mini-idp-as-an-external-issuer.md)); ships a container image and an embeddable `TestIdp`. | service | **shipping** |
+| [mini-idp](services/mini-idp) | Machine identity: OAuth2 client-credentials → Ed25519 JWT (ES256 per mapped audience) + JWKS + OpenID/RFC 8414 discovery. Also a trusted issuer for projects outside the family, such as config-server ([how-to](docs/howto/use-mini-idp-as-an-external-issuer.md)); its embeddable `TestIdp` is on Maven Central as `com.codeheadsystems:mini-idp-testkit` ([RELEASING.md](RELEASING.md)). | service | **shipping** |
 | [mini-token](libs/mini-token) | Shared token plane: JWS, JWKS, key rotation, revocation, audit, SSO session store. | library | **shipping** |
 | [mini-directory](services/mini-directory) | Identity source of truth: humans, service accounts, groups, roles, grants. | service | **shipping** |
 | [mini-oidc](services/mini-oidc) | Human SSO / OpenID Provider (auth-code + PKCE); embeds **pk-auth** passkeys. | service | **shipping** |
@@ -70,13 +70,14 @@ libraries); the Gradle project path follows the directory.
 ```
 mini-auth/
 ├── settings.gradle.kts          # one build: includes every module + build-logic (convention plugins)
-├── build.gradle.kts             # just the `base` plugin — conventions live in build-logic/
+├── build.gradle.kts             # the `base` plugin + nmcp aggregation settings — conventions live in build-logic/
 ├── gradle/libs.versions.toml    # one catalog for the whole family (Jackson 3.x)
-├── build-logic/                 # included build: miniauth.java/library/application-conventions
+├── build-logic/                 # included build: miniauth.java/library/application/publish-conventions
+├── RELEASING.md                 # Maven Central publishing (mini-idp-testkit + its runtime chain)
 ├── docs/DIRECTION.md            # ← the direction doc
 ├── services/                    # deployable front doors
 │   ├── mini-kms/                #   core/ server/ client/  (shipping)
-│   ├── mini-idp/                #   core/ server/ testkit/ docker/  (shipping; testkit = embeddable TestIdp)
+│   ├── mini-idp/                #   core/ server/ testkit/  (shipping; testkit = TestIdp, on Maven Central)
 │   ├── mini-oidc/               #   shipping; human SSO, embeds pk-auth + mini-token + mini-policy + mini-directory
 │   ├── mini-gateway/            #   shipping; forward-auth, reuses mini-token + mini-policy
 │   ├── mini-directory/          #   shipping; identity source of truth

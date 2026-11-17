@@ -12,7 +12,13 @@
 
 plugins {
     id("miniauth.application-conventions")
+    id("miniauth.publish-conventions")
 }
+
+description = "mini-kms client library, CLIs, and the KMS-wrapped signing-key store"
+
+// Published to Maven Central; also the jar name (unique across the family). See RELEASING.md.
+miniPublish { artifactId = "mini-kms-client" }
 
 dependencies {
     implementation(project(":services:mini-kms:core"))

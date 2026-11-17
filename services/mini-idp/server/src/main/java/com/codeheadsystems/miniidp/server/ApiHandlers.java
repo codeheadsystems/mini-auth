@@ -216,7 +216,8 @@ public final class ApiHandlers {
     doc.put("grant_types_supported", List.of("client_credentials"));
     doc.put("token_endpoint_auth_methods_supported",
         List.of("client_secret_post", "client_secret_basic"));
-    doc.put("token_endpoint_auth_signing_alg_values_supported", signingAlgorithms());
+    // No token_endpoint_auth_signing_alg_values_supported: it describes private_key_jwt /
+    // client_secret_jwt client authentication, which mini-idp does not support.
     doc.put("id_token_signing_alg_values_supported", signingAlgorithms());
     return HttpResponse.json(200, doc);
   }

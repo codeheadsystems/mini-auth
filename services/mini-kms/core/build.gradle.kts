@@ -8,13 +8,13 @@
 
 plugins {
     id("miniauth.library-conventions")
+    id("miniauth.publish-conventions")
 }
 
-// Leaf module names repeat across the family (`:services:mini-kms:core`, `:services:mini-idp:core`),
-// so the default jar name (`core.jar`) collides when one service's distribution bundles both. Give
-// each a unique archive name — now that mini-idp/mini-oidc pull in mini-kms:core (transitively via the
-// KMS client) for the recursive integration, both `core` jars can land in one distribution.
-base { archivesName = "mini-kms-core" }
+description = "mini-kms core: envelope encryption, keyring, and wire protocol"
+
+// Published to Maven Central; also the jar name (unique across the family). See RELEASING.md.
+miniPublish { artifactId = "mini-kms-core" }
 
 dependencies {
     // Argon2id KDF + a reliable crypto provider.

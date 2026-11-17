@@ -19,6 +19,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  * @param createdAt          creation time (epoch seconds).
  * @param retiredAt          retirement time (epoch seconds), or null while active. A retired key
  *                           stays published in JWKS until every token it could have signed expires.
+ *                           A key that is neither active nor retired is a pre-published <b>next</b>
+ *                           key (see {@code SigningKeyService}).
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record SigningKeyRecord(
@@ -32,5 +34,10 @@ public record SigningKeyRecord(
   /** @return a copy marked retired at the given time (no longer the active signer). */
   public SigningKeyRecord retiredAt(final long when) {
     return new SigningKeyRecord(kid, privatePkcs8Base64, publicSpkiBase64, false, createdAt, when);
+  }
+
+  /** @return a copy marked active (a pre-published next key being promoted). */
+  public SigningKeyRecord activated() {
+    return new SigningKeyRecord(kid, privatePkcs8Base64, publicSpkiBase64, true, createdAt, null);
   }
 }

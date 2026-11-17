@@ -1,7 +1,8 @@
 # How-to: use mini-idp as the token issuer for another project
 
 > **How-to (task-oriented).** Make a service *outside* the mini- family (a "relying party") accept
-> mini-idp's machine tokens, in production and in that project's CI. The worked example is
+> mini-idp's machine tokens, in production and in that project's CI (with `TestIdp` from Maven
+> Central). The worked example is
 > **config-server** (`~/projects/config`, `com.codeheadsystems:config-*`), but every step applies to
 > any JOSE-based verifier (Nimbus, jose4j, Spring Security's resource server, `go-jose`, `jose` in
 > Node, ...). Reference: [`services/mini-idp/README.md`](../../services/mini-idp/README.md).
@@ -14,9 +15,9 @@
 | Find the keys | Discovery at `<issuer>/.well-known/openid-configuration` (also `/.well-known/oauth-authorization-server` and the original `/.well-known/idp-configuration`, all identical) naming `issuer` and `jwks_uri`. |
 | A token meant for *you* | The client asks for your audience with RFC 8707 `resource=<aud>` (or `audience=<aud>`). mini-idp issues it only if that client is allowlisted for the audience; otherwise `400 invalid_target`. |
 | An algorithm your stack accepts | Tokens for the default audience are EdDSA (Ed25519). The operator can map any audience to **ES256** (P-256, raw 64-byte `R‖S`), which every mainstream JOSE library verifies. |
-| Key rotation without coordination | Each algorithm has its own key set. Retired keys stay in the JWKS for 2x the token TTL; a verifier that refetches the JWKS on an unknown `kid` (Nimbus does) keeps working through a rotation. |
+| Key rotation without coordination | Each algorithm has its own key set. The **next** key is published before it signs anything, so the kid used after a rotation is already in a verifier's cached JWKS; retired keys stay for 2x the token TTL. A verifier whose JWKS refetch is rate-limited (config-server's Nimbus source: twice per 30 s) therefore never meets an unknown kid after a single rotation. |
 | A stable caller identity | `sub` is the service account's client id, fixed for the account's lifetime. |
-| Something to run in CI | A container image (`ghcr.io/codeheadsystems/mini-idp`) and an in-process `TestIdp`, both with service accounts seeded from configuration (no mini-directory needed). |
+| Something to run in CI | `TestIdp` (Maven Central: `com.codeheadsystems:mini-idp-testkit`): the real issuer in-process, with service accounts added from the test (no mini-directory needed). |
 
 The token is a compact JWS with header `{"alg":"ES256","typ":"JWT","kid":"..."}` and claims
 `iss`, `sub`, `aud` (a single string), `iat`, `nbf`, `exp` (default TTL 300 s), `jti`, plus mini-idp's
@@ -96,89 +97,64 @@ out rather than fetching one per request.
 
 ## Step 6: test it in the relying party's CI
 
-Two options, both running the real issuer with service accounts seeded from configuration instead of
-mini-directory. The seed is a JSON array (`clientId` and `secret` required; `audiences`, `admin`,
-`grants` optional):
+Use **`TestIdp`** from the `mini-idp-testkit` artifact on Maven Central. It starts the real mini-idp
+server inside the test's JVM on an ephemeral loopback port, with an in-memory service-account
+directory (no mini-directory) and a throwaway data directory. Tokens come from the real
+`/oauth/token` endpoint over HTTP, so a test exercises exactly what a deployed issuer does.
 
-```json
-[{ "clientId": "billing", "secret": "s3cret", "audiences": ["config-server"] }]
+**Coordinates:** `com.codeheadsystems:mini-idp-testkit:<version>`. It pulls in, at runtime only,
+`mini-idp-server`, `mini-idp-core`, `mini-token`, `mini-kms-client`, `mini-kms-core` and
+`mini-policy` (same group, same version), plus Jackson and Bouncy Castle. Its public API uses only
+JDK types, so none of them is on your compile classpath. It needs Java 21 or later.
+
+```kotlin
+// Gradle
+dependencies {
+    testImplementation("com.codeheadsystems:mini-idp-testkit:0.1.0")
+}
 ```
 
-### Option A: the container image (any language, Testcontainers)
-
-Image: `ghcr.io/codeheadsystems/mini-idp:<X.Y.Z>` (or `:<X.Y>`), `linux/amd64` and `linux/arm64`.
-Released by pushing a `mini-idp-vX.Y.Z` tag in mini-auth (`.github/workflows/mini-idp-image.yml`).
-The examples below use `0.1.0`; substitute the version you pin. (No version has been released yet;
-until one is, build the image locally as shown at the end of this option.)
-
-| Env var | Value for a test |
-| --- | --- |
-| `MINIIDP_ADMIN_TOKEN` | any string (required; used for key rotation) |
-| `MINIIDP_PORT` | a free host port `P` |
-| `MINIIDP_AUDIENCE_ALGORITHMS` | `config-server=ES256` |
-| `MINIIDP_SERVICE_ACCOUNTS` | the seed JSON |
-| `MINIIDP_ISSUER` | optional; defaults to `http://localhost:P` |
-
-**Map the port as `P:P`, not to a random host port.** The verifier compares `iss` with the issuer it
-was configured with and fetches discovery from that URL, so the port inside the container must equal
-the port the test reaches. Wait on `GET /health` (`200 {"status":"ok"}`).
-
-```java
-int port;
-try (ServerSocket socket = new ServerSocket(0)) { port = socket.getLocalPort(); }
-GenericContainer<?> idp = new GenericContainer<>("ghcr.io/codeheadsystems/mini-idp:0.1.0")
-    .withEnv("MINIIDP_PORT", Integer.toString(port))
-    .withEnv("MINIIDP_ADMIN_TOKEN", "test-admin")
-    .withEnv("MINIIDP_AUDIENCE_ALGORITHMS", "config-server=ES256")
-    .withEnv("MINIIDP_SERVICE_ACCOUNTS",
-        "[{\"clientId\":\"billing\",\"secret\":\"s3cret\",\"audiences\":[\"config-server\"]}]")
-    .withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withPortBindings(
-        new PortBinding(Ports.Binding.bindIpAndPort("127.0.0.1", port), new ExposedPort(port))))
-    .waitingFor(Wait.forHttp("/health").forPort(port));
-idp.start();
-String issuer = "http://localhost:" + port;   // configure config-server to trust this, audience config-server
-// token: POST issuer + "/oauth/token" with grant_type=client_credentials, client_id=billing,
-//        client_secret=s3cret, resource=config-server
-// rotate: POST issuer + "/admin/keys/rotate" with "Authorization: Bearer test-admin"
-//         -> {"activeKid":"...","activeKids":{"EdDSA":"...","ES256":"..."}}
+```xml
+<!-- Maven -->
+<dependency>
+  <groupId>com.codeheadsystems</groupId>
+  <artifactId>mini-idp-testkit</artifactId>
+  <version>0.1.0</version>
+  <scope>test</scope>
+</dependency>
 ```
 
-Without Testcontainers, the same thing from a shell:
-
-```bash
-docker run -d --rm -p 127.0.0.1:18455:18455 -e MINIIDP_PORT=18455 -e MINIIDP_ADMIN_TOKEN=test-admin \
-  -e MINIIDP_AUDIENCE_ALGORITHMS=config-server=ES256 \
-  -e 'MINIIDP_SERVICE_ACCOUNTS=[{"clientId":"billing","secret":"s3cret","audiences":["config-server"]}]' \
-  ghcr.io/codeheadsystems/mini-idp:0.1.0
-```
-
-To try an unreleased build, build the image locally:
-
-```bash
-./gradlew :services:mini-idp:server:installDist
-docker build -f services/mini-idp/docker/Dockerfile --build-context docker=services/mini-idp/docker \
-  -t mini-idp:dev services/mini-idp/server/build/install/server
-```
-
-### Option B: the in-process `TestIdp` (JVM)
-
-`:services:mini-idp:testkit` (`com.codeheadsystems.miniidp.testkit.TestIdp`) starts the real server
-in the test's JVM on an ephemeral loopback port and derives the issuer from it, so there is no port
-mapping to get wrong:
+The examples use `0.1.0`; substitute the version you pin. No version has been released yet. Until
+one is, try a local build: `./gradlew -Pversion=0.1.0 nmcpZipAggregation` in mini-auth, unzip
+`build/nmcp/zip/aggregation.zip` into a directory, and add that directory as a `maven` repository
+ahead of Maven Central (see `RELEASING.md`, "Checking locally").
 
 ```java
 try (TestIdp idp = TestIdp.builder().audienceAlgorithm("config-server", "ES256").start()) {
   idp.addServiceAccount("billing", "s3cret", "config-server");     // works after start, too
   String token = idp.token("billing", "s3cret", "config-server");  // ES256, aud=config-server, sub=billing
   String issuer = idp.issuer();                                    // http://127.0.0.1:<port>
+  // configure the relying party: trusted issuer = issuer, audience = "config-server"
   Map<String, String> kids = idp.rotateKeys();                     // {EdDSA=..., ES256=...}
 }
 ```
 
-**Not yet on Maven Central.** mini-auth has no publishing setup, and publishing the testkit means
-publishing its dependency chain too (mini-idp server and core, mini-token, mini-kms client and core).
-Until then, outside this repo use Option A. Inside this repo, depend on it with
-`testImplementation(project(":services:mini-idp:testkit"))`.
+The issuer is derived from the bound port, so discovery, `jwks_uri` and every token's `iss` name the
+address the verifier actually fetches from; there is nothing to map. The API:
+
+| Call | Does |
+| --- | --- |
+| `TestIdp.start()` | Defaults: audience `mini-kms`, EdDSA only. |
+| `TestIdp.builder()` `.audienceAlgorithm(aud, "ES256")` `.defaultAudience(aud)` `.tokenTtlSeconds(n)` `.start()` | A customized issuer. |
+| `addServiceAccount(clientId, secret, audiences...)` | Add or replace an account; `clientId` is the token's `sub`; `audiences` is its allowlist. |
+| `token(clientId, secret[, audience])` | A token through the client-credentials grant (`resource=audience`). A refusal throws `IllegalStateException` carrying the OAuth error (`invalid_target`, `invalid_client`). |
+| `rotateKeys()` | Rotate every key set; returns the new active kid per algorithm. |
+| `issuer()`, `port()`, `defaultAudience()` | For configuring the verifier. |
+| `close()` | Stop the server and delete its data directory. |
+
+Start one `TestIdp` per test class (for example in `@BeforeAll`), and point the relying party's
+trusted-issuer configuration at `idp.issuer()` before it starts. Inside mini-auth itself, depend on
+it with `testImplementation(project(":services:mini-idp:testkit"))`.
 
 ### What the relying party's tests should cover
 
@@ -189,17 +165,18 @@ checks with a verifier built the way config-server builds one:
 1. A token for your audience is accepted, and `sub` is the client id.
 2. A token for another audience (for example the default `mini-kms` one) is refused.
 3. A client that is not allowlisted for your audience gets `400 invalid_target` from mini-idp.
-4. After `POST /admin/keys/rotate`, a new token (new `kid`) is accepted because the verifier refetches
-   the JWKS, and a token issued before the rotation still verifies.
+4. After a rotation (`idp.rotateKeys()`), a new token (new `kid`) is accepted without a JWKS refetch,
+   because that kid was pre-published, and a token issued before the rotation still verifies.
+5. After two quick rotations, the new kid is unknown to the cached JWKS and is found by refetching it.
 
 ## Troubleshooting
 
 | Symptom | Cause |
 | --- | --- |
-| `invalid_target` from `/oauth/token` | The client is not allowlisted for that audience (`token:audience` grant, or `audiences` in the seed), or `resource` and `audience` were both sent with different values. |
+| `invalid_target` from `/oauth/token` | The client is not allowlisted for that audience (`token:audience` grant, `audiences` in the seed, or the `audiences` of `TestIdp.addServiceAccount`), or `resource` and `audience` were both sent with different values. |
 | `invalid_client` | Wrong client id or secret (deliberately one generic error). |
-| Verifier: "issuer mismatch" or discovery names a different issuer | `--issuer` / `MINIIDP_ISSUER` differs from the relying party's configured issuer (trailing slash, `127.0.0.1` vs `localhost`, or a container port mapped to a different host port). |
+| Verifier: "issuer mismatch" or discovery names a different issuer | `--issuer` / `MINIIDP_ISSUER` differs from the relying party's configured issuer (trailing slash, or `127.0.0.1` vs `localhost`; with `TestIdp`, use `idp.issuer()` verbatim). |
 | Verifier: "insecure jwks_uri" | The issuer is `http` on a non-loopback host. Use `https` via a reverse proxy. |
 | Verifier: unsupported or unexpected algorithm | The token is EdDSA because its audience is not mapped. Add `--audience-algorithm <aud>=ES256` and restart. |
 | Verifier: audience rejected | The client asked for no audience (got `mini-kms`) or a different one. Send `resource=<your audience>`. |
-| Verifier: no key for `kid` right after a rotation | The verifier is not refetching the JWKS on an unknown `kid`, or its refetch is rate-limited (Nimbus: 30 s by default). |
+| Verifier: no key for `kid` right after a rotation | Two rotations happened within the verifier's cache period (the second activates a key published after the cache was filled) and its refetch is rate-limited, or it does not refetch on an unknown `kid` at all. Space rotations out by more than the verifier's JWKS cache lifetime. |

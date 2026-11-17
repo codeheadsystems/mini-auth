@@ -20,3 +20,17 @@
 plugins {
     base
 }
+
+// Maven Central aggregation (the nmcp settings plugin applies it here; see settings.gradle.kts and
+// RELEASING.md). Leaf project names repeat (core, server, client), which nmcp refuses by default
+// because projects with the same Gradle group AND name collide in dependency resolution. That
+// cannot happen here: projects keep their default, path-derived groups (see gradle.properties), and
+// every publication has an explicit, unique artifactId (miniPublish).
+// nmcp resolves its task runtime (com.gradleup.nmcp:nmcp-tasks) from the root project.
+repositories {
+    mavenCentral()
+}
+
+extensions.configure<nmcp.NmcpAggregationExtension> {
+    allowDuplicateProjectNames.set(true)
+}

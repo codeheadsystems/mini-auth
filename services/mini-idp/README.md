@@ -34,7 +34,7 @@ model, so the KMS can later turn a verified token into a `Principal` with grants
   - [How to verify a token offline](#how-to-verify-a-token-offline)
 - [Per-token audience and signing algorithm](#per-token-audience-and-signing-algorithm)
 - [Using mini-idp as a token issuer for config-server](#using-mini-idp-as-a-token-issuer-for-config-server)
-- [Running without mini-directory: container image & embedded test issuer](#running-without-mini-directory)
+- [Running without mini-directory: seeded accounts & the embedded test issuer (Maven Central)](#running-without-mini-directory)
 - [Endpoints](#endpoints)
 - [Configuration](#configuration)
 - [Architecture](#architecture)
@@ -114,8 +114,16 @@ The three discovery URLs serve the same document (OpenID Connect Discovery 1.0, 
 original mini-idp name). `id_token_signing_alg_values_supported` lists `["EdDSA"]`, or
 `["EdDSA", "ES256"]` when an audience is mapped to ES256; the EC key appears in the JWKS only then.
 
-The JWKS contains the active signing key plus any **recently retired** keys (overlapping `kid`s),
-so a token signed just before a rotation keeps verifying until it expires.
+Per algorithm, the JWKS contains the active signing key, the **next** key, and any **recently
+retired** keys (overlapping `kid`s). The next key is published before it signs anything, so after a
+rotation the new `kid` is already in a verifier's cached JWKS; a verifier with a rate-limited
+refetch (config-server's Nimbus source refetches at most twice per 30 s) never meets an unknown
+`kid` after a single rotation. Retired keys keep a token signed just before a rotation verifying
+until it expires.
+
+The discovery document does not include `token_endpoint_auth_signing_alg_values_supported`: that
+field describes `private_key_jwt` / `client_secret_jwt` client authentication, which mini-idp does
+not support (clients authenticate with `client_secret_post` or `client_secret_basic`).
 
 ### Token claim schema
 
@@ -225,17 +233,18 @@ from issuers it is configured to trust: it discovers keys through
 **Client side:** `POST /oauth/token` with `grant_type=client_credentials`, the client credentials,
 and `resource=config-server`. The result is an ES256 token with `aud: "config-server"`.
 
-**Step-by-step guide** (production setup, CI with the container image or `TestIdp`, what a
+**Step-by-step guide** (production setup, CI with `TestIdp` from Maven Central, what a
 relying party's tests should cover, troubleshooting), for config-server or any other project:
 [`docs/howto/use-mini-idp-as-an-external-issuer.md`](../../docs/howto/use-mini-idp-as-an-external-issuer.md).
 
 `services/mini-idp/testkit`'s `ConfigServerCompatibilityTest` verifies tokens exactly the way
 config-server does (Nimbus `DefaultJWTProcessor`, discovery, config-server's algorithm set and claim
-checks), including finding a rotated ES256 key by refetching the JWKS.
+checks), including rotation: the rotated-in ES256 kid is already in the verifier's cached JWKS, and
+after two quick rotations it is found by refetching.
 
 ## Running without mini-directory
 
-For other projects' integration tests (and a zero-dependency local run), mini-idp can seed an
+For a zero-dependency local run, mini-idp can seed an
 **in-memory service-account directory** from configuration instead of calling mini-directory. Set
 exactly one of `MINIIDP_SERVICE_ACCOUNTS` (inline JSON, env only, since it holds secrets) or
 `--service-accounts-file` / `MINIIDP_SERVICE_ACCOUNTS_FILE`, and no `--directory-url`:
@@ -251,53 +260,19 @@ exactly one of `MINIIDP_SERVICE_ACCOUNTS` (inline JSON, env only, since it holds
 `clientId` and `secret` are required; `audiences`, `admin` and `grants` (mini-directory's flat
 `{action, resource}` shape) are optional. The token's `sub` is the `clientId`.
 
-### Container image
+### Embedded test issuer (`testkit`, on Maven Central)
 
-`ghcr.io/codeheadsystems/mini-idp:<version>` (published by `.github/workflows/mini-idp-image.yml` on
-a `mini-idp-vX.Y.Z` tag; `linux/amd64` + `linux/arm64`). It binds `0.0.0.0` inside the container,
-keeps its data in `/data`, runs as a non-root user, and defaults the issuer to
-`http://localhost:$MINIIDP_PORT`.
+Other projects' integration tests use **`TestIdp`**, published as
+**`com.codeheadsystems:mini-idp-testkit`** (see [`RELEASING.md`](../../RELEASING.md)):
 
-| Env var | Purpose |
-| --- | --- |
-| `MINIIDP_ADMIN_TOKEN` | Required (key rotation / admin API). |
-| `MINIIDP_SERVICE_ACCOUNTS` | The seed above. |
-| `MINIIDP_AUDIENCE_ALGORITHMS` | e.g. `config-server=ES256`. |
-| `MINIIDP_PORT` | Listen port (default `8455`). |
-| `MINIIDP_ISSUER` | Override the issuer (default `http://localhost:$MINIIDP_PORT`). |
-| `MINIIDP_TOKEN_TTL_SECONDS`, `MINIIDP_AUDIENCE` | As in [Configuration](#configuration). |
-
-Health: `GET /health` → `200 {"status":"ok"}`.
-
-**The port-mapping catch.** A verifier on the host compares `iss` with the URL it fetched discovery
-from. So pick a free port `P`, run the container with `MINIIDP_PORT=P` and a **fixed** mapping
-`P:P`, and trust `http://localhost:P`. With Testcontainers:
-
-```java
-int port = /* a free host port */;
-GenericContainer<?> idp = new GenericContainer<>("ghcr.io/codeheadsystems/mini-idp:<version>")
-    .withEnv("MINIIDP_PORT", Integer.toString(port))
-    .withEnv("MINIIDP_ADMIN_TOKEN", "test-admin")
-    .withEnv("MINIIDP_AUDIENCE_ALGORITHMS", "config-server=ES256")
-    .withEnv("MINIIDP_SERVICE_ACCOUNTS",
-        "[{\"clientId\":\"billing\",\"secret\":\"s3cret\",\"audiences\":[\"config-server\"]}]")
-    .withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withPortBindings(
-        new PortBinding(Ports.Binding.bindIpAndPort("127.0.0.1", port), new ExposedPort(port))))
-    .waitingFor(Wait.forHttp("/health").forPort(port));
-// issuer = "http://localhost:" + port; token: POST /oauth/token with resource=config-server
+```kotlin
+dependencies {
+    testImplementation("com.codeheadsystems:mini-idp-testkit:0.1.0")
+}
 ```
 
-Build it locally:
-
-```bash
-./gradlew :services:mini-idp:server:installDist
-docker build -f services/mini-idp/docker/Dockerfile --build-context docker=services/mini-idp/docker \
-  -t mini-idp:dev services/mini-idp/server/build/install/server
-```
-
-### Embedded test issuer (`testkit`)
-
-`:services:mini-idp:testkit` (`com.codeheadsystems.miniidp.testkit.TestIdp`) runs the real server
+It pulls in, at runtime only, `mini-idp-server`, `mini-idp-core`, `mini-token`, `mini-kms-client`,
+`mini-kms-core` and `mini-policy` (same group and version). `TestIdp` runs the real server
 in-process on an ephemeral loopback port with an in-memory directory and a temp data dir, and
 derives the issuer from the bound port:
 
@@ -310,8 +285,9 @@ try (TestIdp idp = TestIdp.builder().audienceAlgorithm("config-server", "ES256")
 }
 ```
 
-It is **not yet published to Maven Central** (mini-auth has no publishing setup); inside this repo
-it backs the compatibility test.
+No version has been released yet (`0.1.0` above is the first one planned). Inside this repo it
+backs the compatibility test as `project(":services:mini-idp:testkit")`. The full walkthrough is
+[`docs/howto/use-mini-idp-as-an-external-issuer.md`](../../docs/howto/use-mini-idp-as-an-external-issuer.md).
 
 ## Endpoints
 
@@ -335,7 +311,7 @@ it backs the compatibility test.
 
 | Method & path | Purpose |
 | --- | --- |
-| `POST /admin/keys/rotate` | Rotate every signing key set (old `kid`s stay in JWKS until expiry). Returns `activeKid` (EdDSA) and `activeKids` per algorithm. |
+| `POST /admin/keys/rotate` | Rotate every signing key set: the pre-published next key becomes active and a fresh next key is published (old `kid`s stay in JWKS until expiry). Returns `activeKid` (EdDSA) and `activeKids` per algorithm. |
 | `POST /admin/revocations` | Revoke a `jti` (pollable denylist). |
 | `GET /admin/revocations` | The current denylist (for a verifier to poll). |
 | `GET /admin/audit` | Issuance / grant / revocation / rotation / lifecycle audit entries. |
@@ -431,8 +407,7 @@ verify (offline): access_token --kid--> JWK --EdDSA verify--> claims --map--> Pr
   locally by default, or — with `--kms-tcp`/`--kms-key-group` — envelope-wrapped under mini-kms so no
   plaintext key touches disk (the recursive integration).
 - **Loopback by default**: like mini-kms, this is a local-trust service; exposing it beyond
-  loopback (or setting `--issuer` behind a proxy) is an explicit operator decision. The container
-  image binds `0.0.0.0` *inside* the container; publishing its port is that decision.
+  loopback (or setting `--issuer` behind a proxy) is an explicit operator decision.
 - **Audience allowlist**: a client can only get tokens for the default audience or audiences
   explicitly allowlisted for it (no wildcard), so it cannot mint a token for a relying party it was
   not granted.
@@ -450,4 +425,5 @@ appearing in issued tokens; key rotation (old `kid` still verifies, new tokens u
 revocation showing up on the denylist; the OpenAPI spec being served, parseable, and matching the
 live routes; the no-secrets-in-logs invariant; and (in `testkit`) config-server compatibility:
 ES256 tokens for `config-server` verified with Nimbus via OpenID discovery, wrong-audience refusal,
-the audience allowlist, ES256 rotation found by JWKS refetch, and default EdDSA tokens unchanged.
+the audience allowlist, ES256 rotation (the new kid already in the cached JWKS; found by refetch
+after two quick rotations), and default EdDSA tokens unchanged.

@@ -1,0 +1,18 @@
+name: release
+
+# Publishes to Maven Central when a vX.Y.Z (or vX.Y.Z-suffix) tag is pushed. See RELEASING.md.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+jobs:
+  publish:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

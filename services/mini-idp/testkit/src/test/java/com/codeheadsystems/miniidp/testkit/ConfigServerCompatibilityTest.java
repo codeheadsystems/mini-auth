@@ -69,6 +69,8 @@ class ConfigServerCompatibilityTest {
     assertEquals(List.of("client_credentials"), strings(openId.get("grant_types_supported")));
     assertTrue(strings(openId.get("token_endpoint_auth_methods_supported")).contains("client_secret_basic"));
     assertEquals(List.of("EdDSA", "ES256"), strings(openId.get("id_token_signing_alg_values_supported")));
+    // Only meaningful for private_key_jwt / client_secret_jwt, which mini-idp does not support.
+    assertTrue(openId.get("token_endpoint_auth_signing_alg_values_supported") == null);
     assertTrue(ConfigServerStyleVerifier.isSecure(URI.create(openId.get("jwks_uri").asString())));
   }
 
@@ -117,7 +119,7 @@ class ConfigServerCompatibilityTest {
   }
 
   @Test
-  void afterAnEs256RotationTheNewKidIsFoundByRefetchingTheJwks() throws Exception {
+  void afterAnEs256RotationTheNewKidIsAlreadyInTheCachedJwks() throws Exception {
     final ConfigServerStyleVerifier verifier = new ConfigServerStyleVerifier(idp.issuer(), AUDIENCE);
     final String before = idp.token(CLIENT, SECRET, AUDIENCE);
     assertEquals(CLIENT, verifier.verify(before));
@@ -129,10 +131,31 @@ class ConfigServerCompatibilityTest {
     assertEquals(kids.get("ES256"), newKid);
     assertNotEquals(SignedJWT.parse(before).getHeader().getKeyID(), newKid);
 
-    // The cached JWKS lacks the new kid, so the verifier must refetch to accept the token.
+    // mini-idp published the next key before signing with it, so the JWKS the verifier cached
+    // before the rotation already holds the new kid: no refetch (none could happen anyway inside
+    // config-server's 30 s rate limit window).
+    assertEquals(CLIENT, verifier.verify(after));
+    assertEquals(fetchesBefore, verifier.jwksFetches(), "the new kid was already in the cached JWKS");
+    // The retired key is still published, so the token issued before the rotation still verifies.
+    assertEquals(CLIENT, verifier.verify(before));
+  }
+
+  @Test
+  void afterTwoQuickEs256RotationsTheNewKidIsFoundByRefetchingTheJwks() throws Exception {
+    final ConfigServerStyleVerifier verifier = new ConfigServerStyleVerifier(idp.issuer(), AUDIENCE);
+    final String before = idp.token(CLIENT, SECRET, AUDIENCE);
+    assertEquals(CLIENT, verifier.verify(before));
+    final int fetchesBefore = verifier.jwksFetches();
+
+    // The second rotation activates a key first published by the first one, after the verifier
+    // cached the JWKS, so this kid is unknown to the cache.
+    idp.rotateKeys();
+    final String newKid = idp.rotateKeys().get("ES256");
+    final String after = idp.token(CLIENT, SECRET, AUDIENCE);
+    assertEquals(newKid, SignedJWT.parse(after).getHeader().getKeyID());
+
     assertEquals(CLIENT, verifier.verify(after));
     assertTrue(verifier.jwksFetches() > fetchesBefore, "the new kid was found by refetching the JWKS");
-    // The retired key is still published, so the token issued before the rotation still verifies.
     assertEquals(CLIENT, verifier.verify(before));
   }
 

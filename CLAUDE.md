@@ -87,17 +87,19 @@ directory.
 ```
 mini-auth/
 ├── settings.gradle.kts          # one build: includes every module + pluginManagement.includeBuild(build-logic)
-├── build.gradle.kts             # just the `base` plugin — conventions live in build-logic
+├── build.gradle.kts             # the `base` plugin + nmcp aggregation settings — conventions live in build-logic
 ├── gradle/libs.versions.toml    # one catalog for the whole family (Jackson 3.x)
 ├── build-logic/                 # included build: the shared convention plugins
 │   └── src/main/kotlin/
 │       ├── miniauth.java-conventions.gradle.kts         # toolchain 21, JUnit 5, -parameters, test deps
 │       ├── miniauth.library-conventions.gradle.kts      # java-conventions + java-library
-│       └── miniauth.application-conventions.gradle.kts  # java-conventions + application
+│       ├── miniauth.application-conventions.gradle.kts  # java-conventions + application
+│       └── miniauth.publish-conventions.gradle.kts      # Maven Central: POM, sources/javadoc, signing, miniPublish
+├── RELEASING.md                 # Maven Central release steps (nmcp; release/manual-release/publish workflows)
 ├── docs/DIRECTION.md
 ├── services/                    # deployable front doors
 │   ├── mini-kms/   {core, server, client}   (shipping)
-│   ├── mini-idp/   {core, server, testkit}  (shipping; testkit = embeddable TestIdp + config-server compat test)
+│   ├── mini-idp/   {core, server, testkit}  (shipping; testkit = TestIdp on Maven Central + config-server compat test)
 │   ├── mini-oidc/                           (shipping; human SSO / OpenID Provider, embeds pk-auth)
 │   ├── mini-gateway/                        (shipping; forward-auth for a reverse proxy)
 │   ├── mini-directory/                      (shipping; identity source of truth; mini-idp reads service accounts from it)
@@ -154,6 +156,14 @@ mini-auth/
   unchanged. YAML uses `tools.jackson.dataformat.yaml.YAMLMapper`.
 - **pk-auth is external, not vendored** — `com.codeheadsystems:pk-auth-core` from Maven Central
   (mini-oidc's passkey credential layer).
+- **Publishing (Maven Central).** Modules applying `id("miniauth.publish-conventions")` are
+  published as one nmcp deployment (see `RELEASING.md`): today mini-idp's `testkit` and its runtime
+  chain (`mini-idp-server`, `mini-idp-core`, `mini-token`, `mini-kms-client`, `mini-kms-core`,
+  `mini-policy`). Each sets an explicit, unique `miniPublish { artifactId = "..." }` (leaf names
+  repeat). The groupId is `mavenGroup` in `gradle.properties`; **never set the Gradle `group`
+  globally** — `mini-idp:core` and `mini-kms:core` would then share group+name and Gradle would
+  treat them as one module. Anything a published module needs at runtime must be published too.
+  Version: `gradle.properties` SNAPSHOT, or a `vX.Y.Z` tag on `HEAD`.
 
 ## Working in this repo
 
@@ -314,9 +324,13 @@ services/mini-idp/server/build/install/server/bin/server --port 8455 --data-dir 
   AUD=ES256` signs that audience's tokens with a separate ES256 key set (`signing-keys-es256.json`,
   same rotation/KMS wrapping) published in the same JWKS; the default audience stays EdDSA.
   Discovery is also served at `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`.
+  Every key set pre-publishes its **next** key in the JWKS (rotation promotes it), so a verifier's
+  cached JWKS already has the post-rotation kid. Discovery omits
+  `token_endpoint_auth_signing_alg_values_supported` (no `private_key_jwt`/`client_secret_jwt`).
   `MINIIDP_SERVICE_ACCOUNTS` / `--service-accounts-file` seed an in-memory directory instead of
-  `--directory-url` (the container image, `services/mini-idp/docker/`, and `testkit`'s `TestIdp`).
-  `testkit`'s `ConfigServerCompatibilityTest` (Nimbus, test scope) must stay green.
+  `--directory-url`. `testkit`'s `TestIdp` is **published to Maven Central**
+  (`com.codeheadsystems:mini-idp-testkit`) for other projects' tests; `testkit`'s
+  `ConfigServerCompatibilityTest` (Nimbus, test scope) must stay green.
 - **Conventions.** `core` stays HTTP-free (composition root is `server/IdpServer`). The token
   endpoint returns one generic `invalid_client` for any auth failure. Admin token via
   `resolveAdminToken`. **The OpenAPI spec is the contract** — `OpenApiContractTest` fails if a

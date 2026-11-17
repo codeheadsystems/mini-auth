@@ -98,15 +98,18 @@ public final class IdpServer {
                                     final ServiceAccountDirectory directory, final Clock clock)
       throws IOException {
     final RandomIds ids = new RandomIds();
+    // Every key set pre-publishes its next key, so a verifier with a cached JWKS (and a
+    // rate-limited refetch, like config-server's Nimbus source) already knows the kid that signs
+    // right after a rotation. See SigningKeyService's class doc.
     final SigningKeyService signingKeys = new SigningKeyService(
         signingKeyStore(config, kmsApiToken, "signing-keys.json"),
-        ids, clock, config.retiredKeyRetention());
+        SigningAlgorithm.EDDSA, ids, clock, config.retiredKeyRetention(), true);
     final Map<SigningAlgorithm, SigningKeyService> keySets = new EnumMap<>(SigningAlgorithm.class);
     keySets.put(SigningAlgorithm.EDDSA, signingKeys);
     if (config.es256Enabled()) {
       keySets.put(SigningAlgorithm.ES256, new SigningKeyService(
           signingKeyStore(config, kmsApiToken, "signing-keys-es256.json"),
-          SigningAlgorithm.ES256, ids, clock, config.retiredKeyRetention()));
+          SigningAlgorithm.ES256, ids, clock, config.retiredKeyRetention(), true));
     }
     final RevocationService revocations = new RevocationService(
         new JsonStore<>(config.dataDir().resolve("revocations.json"), Revocations.class), clock);

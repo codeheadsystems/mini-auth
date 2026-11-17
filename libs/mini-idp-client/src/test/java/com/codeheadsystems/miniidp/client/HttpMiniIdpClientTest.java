@@ -2,6 +2,7 @@ package com.codeheadsystems.miniidp.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -99,12 +100,27 @@ class HttpMiniIdpClientTest {
 
   @Test
   void rotateSigningKey_publishesNewKidAndRetainsOld() {
+    final String oldKid = kidOf(client.token(CLIENT, SECRET).accessToken());
     final List<String> before = client.jwks().keys().stream().map(Jwk::keyId).toList();
     final String newKid = client.rotateSigningKey().activeKid();
     final List<String> after = client.jwks().keys().stream().map(Jwk::keyId).toList();
-    assertTrue(after.contains(newKid), "the new active kid must appear in the JWKS");
+    assertNotEquals(oldKid, newKid, "rotation must change the signing kid");
+    assertEquals(newKid, kidOf(client.token(CLIENT, SECRET).accessToken()));
+    // mini-idp pre-publishes its next key, so the rotated-in kid was already in the JWKS.
+    assertTrue(before.contains(newKid), "the rotated-in kid was published before it signed");
     assertTrue(after.containsAll(before), "rotation must retain the previously-published kid(s)");
-    assertFalse(before.contains(newKid), "the rotated-in kid must be genuinely new");
+    assertTrue(after.stream().anyMatch(kid -> !before.contains(kid)),
+        "rotation must publish a fresh next kid");
+  }
+
+  private static String kidOf(final String jws) {
+    final String header = new String(
+        java.util.Base64.getUrlDecoder().decode(jws.substring(0, jws.indexOf('.'))),
+        java.nio.charset.StandardCharsets.UTF_8);
+    final java.util.regex.Matcher kid = java.util.regex.Pattern.compile("\"kid\"\\s*:\\s*\"([^\"]+)\"")
+        .matcher(header);
+    assertTrue(kid.find(), header);
+    return kid.group(1);
   }
 
   @Test
